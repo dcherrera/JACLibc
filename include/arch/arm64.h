@@ -48,6 +48,17 @@
 		"and sp, x0, #-16\n"
 		"bl _start_main\n"
 	);
+
+	#if JACL_OS_LINUX
+		__asm__(
+			".text\n"
+			".globl __restore_rt\n"
+			".type __restore_rt,@function\n"
+			"__restore_rt:\n"
+			"mov x8, #139\n"
+			"svc #0\n"
+		);
+	#endif
 #undef __ARCH_START
 #endif
 

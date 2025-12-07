@@ -9,7 +9,7 @@
 // Include syscall numbers
 typedef enum {
 #define X(SYS, num, ...) SYS = (num),
-#include JACL_X_FILES
+#include JACL_X_SYSCALL
 #undef X
 	SYS_max
 } syscall_t;

@@ -47,6 +47,17 @@
 		"andi sp, sp, -16\n"
 		"call _start_main\n"
 	);
+
+	#if JACL_OS_LINUX
+		__asm__(
+			".text\n"
+			".globl __restore_rt\n"
+			".type __restore_rt,@function\n"
+			"__restore_rt:\n"
+			"movi r2, 173\n"
+			"trap\n"
+		);
+	#endif
 #undef __ARCH_START
 #endif
 
@@ -68,4 +79,3 @@
 #ifdef __cplusplus
 	}
 #endif
-

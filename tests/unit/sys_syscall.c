@@ -44,7 +44,7 @@ TEST(syscall_return_value) {
 TEST_SUITE(syscall_numbers);
 
 #define X(SYS, num, name, ...) TEST(sys_##name) { ASSERT_TRUE(SYS > -1); }
-#include JACL_X_FILES
+#include JACL_X_SYSCALL
 
 /* ============================================================================
  * SYSCALL - FILE OPERATIONS

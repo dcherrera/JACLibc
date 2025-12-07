@@ -48,6 +48,18 @@
 		"l.jal _start_main\n"
 		"l.nop\n"
 	);
+
+	#if JACL_OS_LINUX
+		__asm__(
+			".text\n"
+			".globl __restore_rt\n"
+			".type __restore_rt,@function\n"
+			"__restore_rt:\n"
+			"l.addi r11, r0, 173\n"
+			"l.sys 1\n"
+			"l.nop\n"
+		);
+	#endif
 #undef __ARCH_START
 #endif
 
@@ -69,4 +81,3 @@
 #ifdef __cplusplus
 	}
 #endif
-

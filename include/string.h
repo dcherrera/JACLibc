@@ -18,7 +18,7 @@ extern "C" {
 
 void* malloc(size_t);
 
-/* emory Operations */
+/* Memory Operations */
 static inline void* memcpy(void* restrict dest, const void*  restrict src, size_t n) {
 	if (JACL_UNLIKELY(!dest || !src)) return NULL;
 

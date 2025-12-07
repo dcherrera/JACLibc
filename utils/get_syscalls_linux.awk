@@ -1,5 +1,4 @@
 # Converts Linux syscall.tbl or syscall_table.c to X(SYS_name, num, "desc")
-# Usage: awk -v arch=x86 -f convert_linux_syscalls.awk syscall_32.tbl
 
 # Skip comments and blank lines
 /^[[:space:]]*#/ { next }
@@ -20,7 +19,7 @@
 	# Skip empty or placeholder entries
 	if (name == "") next
 
-	printf "X(SYS_%s, %d, \"%s\")\n", name, nr, name
+	printf "X(SYS_%s, %d, %s)\n", name, nr, name
 	next
 }
 
@@ -34,7 +33,7 @@
 			name = $(i+2)
 			gsub(/[,;]/, "", name)
 			sub(/^sys_/, "", name)
-			printf "X(SYS_%s, %d, \"%s\")\n", name, num, name
+			printf "X(SYS_%s, %d, %s)\n", name, num, name
 			break
 		}
 	}

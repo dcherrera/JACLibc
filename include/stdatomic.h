@@ -313,7 +313,7 @@ static inline void atomic_flag_clear_explicit(atomic_flag *f, memory_order mo) {
 
 #define ATOMIC_FLAG_INIT {false}
 
-#if !JACL_HAS_C23
+#if JACL_HAS_C11 && !JACL_HAS_C23
 	#define ATOMIC_VAR_INIT(x) (x)  /* Removed in C23 */
 #endif
 

@@ -6,70 +6,105 @@ TEST_TYPE(unit);
 TEST_UNIT(signal.h);
 
 /* ============================================================================
- * SIGNAL CONSTANTS - ISO C
+ * SIGNAL CONSTANTS - ISO C (Required on all platforms)
  * ============================================================================ */
-TEST_SUITE(iso_signals);
+TEST_SUITE(constants);
 
-TEST(standard_signals_defined) {
-	ASSERT_EQ(6, SIGABRT);
-	ASSERT_EQ(8, SIGFPE);
-	ASSERT_EQ(4, SIGILL);
-	ASSERT_EQ(2, SIGINT);
-	ASSERT_EQ(11, SIGSEGV);
-	ASSERT_EQ(15, SIGTERM);
+TEST(constants_iso_signals_defined) {
+	/* ISO C requires these 6 signals */
+	ASSERT_TRUE(SIGABRT > 0);
+	ASSERT_TRUE(SIGFPE > 0);
+	ASSERT_TRUE(SIGILL > 0);
+	ASSERT_TRUE(SIGINT > 0);
+	ASSERT_TRUE(SIGSEGV > 0);
+	ASSERT_TRUE(SIGTERM > 0);
 }
 
-TEST(signal_constants_unique) {
+TEST(constants_iso_signals_unique) {
+	/* All ISO C signals must be distinct */
 	ASSERT_NE(SIGABRT, SIGFPE);
-	ASSERT_NE(SIGINT, SIGTERM);
+	ASSERT_NE(SIGABRT, SIGILL);
+	ASSERT_NE(SIGABRT, SIGINT);
+	ASSERT_NE(SIGABRT, SIGSEGV);
+	ASSERT_NE(SIGABRT, SIGTERM);
+
+	ASSERT_NE(SIGFPE, SIGILL);
+	ASSERT_NE(SIGFPE, SIGINT);
+	ASSERT_NE(SIGFPE, SIGSEGV);
+	ASSERT_NE(SIGFPE, SIGTERM);
+
+	ASSERT_NE(SIGILL, SIGINT);
 	ASSERT_NE(SIGILL, SIGSEGV);
+	ASSERT_NE(SIGILL, SIGTERM);
+
+	ASSERT_NE(SIGINT, SIGSEGV);
+	ASSERT_NE(SIGINT, SIGTERM);
+
+	ASSERT_NE(SIGSEGV, SIGTERM);
 }
 
-TEST(signal_handler_constants) {
-	ASSERT_NOT_NULL(SIG_DFL);
-	ASSERT_NOT_NULL(SIG_IGN);
+TEST(constants_handler_values) {
+	/* SIG_DFL is NULL (0) by definition */
+	ASSERT_EQ(0, (intptr_t)SIG_DFL);
+
+	/* SIG_IGN is non-zero */
+	ASSERT_NE(0, (intptr_t)SIG_IGN);
+
+	/* SIG_ERR is -1 */
 	ASSERT_EQ(-1, (intptr_t)SIG_ERR);
+
+	/* All three must be distinct */
+	ASSERT_NE(SIG_DFL, SIG_IGN);
+	ASSERT_NE(SIG_DFL, SIG_ERR);
+	ASSERT_NE(SIG_IGN, SIG_ERR);
 }
 
-/* ============================================================================
- * POSIX SIGNALS
- * ============================================================================ */
 #if JACL_HAS_POSIX
-TEST_SUITE(posix_signals);
+/* Generate tests for all POSIX signals using X macro */
+#define TEST_SIGNAL_DEFINED(sig) \
+	TEST(constants_posix_##sig##_defined) { \
+		ASSERT_TRUE(sig > 0); \
+	}
 
-TEST(posix_signals_defined) {
-	ASSERT_EQ(1, SIGHUP);
-	ASSERT_EQ(3, SIGQUIT);
-	ASSERT_EQ(9, SIGKILL);
-	ASSERT_EQ(10, SIGUSR1);
-	ASSERT_EQ(12, SIGUSR2);
-	ASSERT_EQ(13, SIGPIPE);
-	ASSERT_EQ(14, SIGALRM);
-}
+TEST_SIGNAL_DEFINED(SIGHUP)
+TEST_SIGNAL_DEFINED(SIGQUIT)
+TEST_SIGNAL_DEFINED(SIGKILL)
+TEST_SIGNAL_DEFINED(SIGUSR1)
+TEST_SIGNAL_DEFINED(SIGUSR2)
+TEST_SIGNAL_DEFINED(SIGPIPE)
+TEST_SIGNAL_DEFINED(SIGALRM)
+TEST_SIGNAL_DEFINED(SIGCHLD)
+TEST_SIGNAL_DEFINED(SIGCONT)
+TEST_SIGNAL_DEFINED(SIGSTOP)
+TEST_SIGNAL_DEFINED(SIGTSTP)
+TEST_SIGNAL_DEFINED(SIGTTIN)
+TEST_SIGNAL_DEFINED(SIGTTOU)
 
-TEST(process_control_signals) {
-	ASSERT_EQ(17, SIGCHLD);
-	ASSERT_EQ(18, SIGCONT);
-	ASSERT_EQ(19, SIGSTOP);
-	ASSERT_EQ(20, SIGTSTP);
-}
+#undef TEST_SIGNAL_DEFINED
 
-TEST(terminal_signals) {
-	ASSERT_EQ(21, SIGTTIN);
-	ASSERT_EQ(22, SIGTTOU);
-}
-
-TEST(realtime_signals) {
-	ASSERT_EQ(34, SIGRTMIN);
-	ASSERT_EQ(64, SIGRTMAX);
+TEST(constants_realtime_range) {
+	ASSERT_TRUE(SIGRTMIN > 0);
+	ASSERT_TRUE(SIGRTMAX > 0);
 	ASSERT_TRUE(SIGRTMAX > SIGRTMIN);
+}
+
+TEST(constants_mask_operations) {
+	ASSERT_EQ(0, SIG_BLOCK);
+	ASSERT_EQ(1, SIG_UNBLOCK);
+	ASSERT_EQ(2, SIG_SETMASK);
+}
+#endif /* JACL_HAS_POSIX */
+
+#if JACL_HAS_C23
+TEST(constants_c23_version) {
+	ASSERT_EQ(202311L, __STDC_VERSION_SIGNAL_H__);
 }
 #endif
 
 /* ============================================================================
  * SIG_ATOMIC_T TYPE
  * ============================================================================ */
-TEST_SUITE(sig_atomic);
+TEST_SUITE(sig_atomic_t);
 
 TEST(sig_atomic_t_defined) {
 	sig_atomic_t val = 42;
@@ -90,330 +125,14 @@ TEST(sig_atomic_t_volatile) {
 	ASSERT_EQ(1, flag);
 }
 
-/* ============================================================================
- * SIGNAL HANDLER TYPES
- * ============================================================================ */
-TEST_SUITE(handler_types);
-
-TEST(sighandler_t_typedef) {
-	__sighandler_t handler = SIG_DFL;
-	ASSERT_EQ(SIG_DFL, handler);
-}
-
-TEST(sig_t_typedef) {
-	sig_t handler = SIG_IGN;
-	ASSERT_EQ(SIG_IGN, handler);
-}
-
-/* ============================================================================
- * RAISE FUNCTION
- * ============================================================================ */
-TEST_SUITE(raise_function);
-
-static volatile sig_atomic_t signal_received = 0;
-
-static void test_handler(int sig) {
-	signal_received = sig;
-}
-
-TEST(raise_basic) {
-	signal_received = 0;
-	signal(SIGTERM, test_handler);
-	
-	int result = raise(SIGTERM);
-	
-	ASSERT_EQ(0, result);
-	ASSERT_EQ(SIGTERM, signal_received);
-}
-
-TEST(raise_different_signals) {
-	signal_received = 0;
-	
-	signal(SIGINT, test_handler);
-	raise(SIGINT);
-	ASSERT_EQ(SIGINT, signal_received);
-	
-	signal(SIGABRT, test_handler);
-	raise(SIGABRT);
-	ASSERT_EQ(SIGABRT, signal_received);
-}
-
-/* ============================================================================
- * SIGNAL FUNCTION
- * ============================================================================ */
-TEST_SUITE(signal_function);
-
-TEST(signal_set_handler) {
-	sig_t old = signal(SIGTERM, test_handler);
-	ASSERT_NE(SIG_ERR, old);
-}
-
-TEST(signal_default) {
-	sig_t old = signal(SIGINT, SIG_DFL);
-	ASSERT_NE(SIG_ERR, old);
-}
-
-TEST(signal_ignore) {
-	sig_t old = signal(SIGTERM, SIG_IGN);
-	ASSERT_NE(SIG_ERR, old);
-}
-
-TEST(signal_restore) {
-	sig_t old = signal(SIGINT, test_handler);
-	sig_t restored = signal(SIGINT, old);
-	
-	ASSERT_EQ(test_handler, restored);
-}
-
-/* ============================================================================
- * POSIX SIGSET OPERATIONS
- * ============================================================================ */
-#if JACL_HAS_POSIX
-TEST_SUITE(sigset_operations);
-
-TEST(sigemptyset_basic) {
-	sigset_t set;
-	int result = sigemptyset(&set);
-	
-	ASSERT_EQ(0, result);
-	ASSERT_EQ(0, set);
-}
-
-TEST(sigfillset_basic) {
-	sigset_t set;
-	int result = sigfillset(&set);
-	
-	ASSERT_EQ(0, result);
-	ASSERT_NE(0, set);
-}
-
-TEST(sigaddset_basic) {
-	sigset_t set;
-	sigemptyset(&set);
-	
-	int result = sigaddset(&set, SIGINT);
-	ASSERT_EQ(0, result);
-	ASSERT_NE(0, set);
-}
-
-TEST(sigdelset_basic) {
-	sigset_t set;
-	sigfillset(&set);
-	
-	int result = sigdelset(&set, SIGINT);
-	ASSERT_EQ(0, result);
-}
-
-TEST(sigismember_basic) {
-	sigset_t set;
-	sigemptyset(&set);
-	
-	ASSERT_FALSE(sigismember(&set, SIGINT));
-	
-	sigaddset(&set, SIGINT);
-	ASSERT_TRUE(sigismember(&set, SIGINT));
-}
-
-TEST(sigset_multiple_signals) {
-	sigset_t set;
-	sigemptyset(&set);
-	
-	sigaddset(&set, SIGINT);
-	sigaddset(&set, SIGTERM);
-	sigaddset(&set, SIGHUP);
-	
-	ASSERT_TRUE(sigismember(&set, SIGINT));
-	ASSERT_TRUE(sigismember(&set, SIGTERM));
-	ASSERT_TRUE(sigismember(&set, SIGHUP));
-	ASSERT_FALSE(sigismember(&set, SIGQUIT));
-}
-
-TEST(sigset_add_remove) {
-	sigset_t set;
-	sigemptyset(&set);
-	
-	sigaddset(&set, SIGINT);
-	ASSERT_TRUE(sigismember(&set, SIGINT));
-	
-	sigdelset(&set, SIGINT);
-	ASSERT_FALSE(sigismember(&set, SIGINT));
-}
-#endif
-
-/* ============================================================================
- * SIGACTION STRUCTURE
- * ============================================================================ */
-#if JACL_HAS_POSIX
-TEST_SUITE(sigaction_struct);
-
-TEST(sigaction_structure_defined) {
-	struct sigaction act;
-	
-	act.sa_handler = SIG_DFL;
-	act.sa_flags = 0;
-	
-	ASSERT_EQ(SIG_DFL, act.sa_handler);
-}
-
-TEST(sigaction_flags) {
-	struct sigaction act;
-	
-	act.sa_flags = SA_RESTART;
-	ASSERT_EQ(SA_RESTART, act.sa_flags);
-	
-	act.sa_flags = SA_NOCLDSTOP;
-	ASSERT_EQ(SA_NOCLDSTOP, act.sa_flags);
-}
-
-TEST(sigaction_multiple_flags) {
-	struct sigaction act;
-	
-	act.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-	ASSERT_TRUE(act.sa_flags & SA_RESTART);
-	ASSERT_TRUE(act.sa_flags & SA_NOCLDSTOP);
-}
-#endif
-
-/* ============================================================================
- * SIGINFO STRUCTURE
- * ============================================================================ */
-#if JACL_HAS_POSIX
-TEST_SUITE(siginfo_struct);
-
-TEST(siginfo_t_structure) {
-	siginfo_t info;
-	
-	info.si_signo = SIGINT;
-	info.si_code = SI_USER;
-	info.si_value.sival_int = 42;
-	
-	ASSERT_EQ(SIGINT, info.si_signo);
-	ASSERT_EQ(SI_USER, info.si_code);
-	ASSERT_EQ(42, info.si_value.sival_int);
-}
-
-TEST(sigval_union) {
-	union sigval val;
-	
-	val.sival_int = 123;
-	ASSERT_EQ(123, val.sival_int);
-	
-	int dummy = 0;
-	val.sival_ptr = &dummy;
-	ASSERT_EQ(&dummy, val.sival_ptr);
-}
-#endif
-
-/* ============================================================================
- * SIGNAL MASK OPERATIONS
- * ============================================================================ */
-#if JACL_HAS_POSIX
-TEST_SUITE(signal_mask);
-
-TEST(sig_block_constant) {
-	ASSERT_EQ(0, SIG_BLOCK);
-}
-
-TEST(sig_unblock_constant) {
-	ASSERT_EQ(1, SIG_UNBLOCK);
-}
-
-TEST(sig_setmask_constant) {
-	ASSERT_EQ(2, SIG_SETMASK);
-}
-#endif
-
-/* ============================================================================
- * INLINE OPTIMIZATIONS
- * ============================================================================ */
-#if JACL_HAS_C99 && JACL_HAS_POSIX
-TEST_SUITE(inline_optimizations);
-
-TEST(sigisemptyset_fast) {
-	sigset_t set;
-	sigemptyset(&set);
-	
-	ASSERT_TRUE(__sigisemptyset(&set));
-	
-	sigaddset(&set, SIGINT);
-	ASSERT_FALSE(__sigisemptyset(&set));
-}
-
-TEST(sigemptyset_fast) {
-	sigset_t set;
-	__sigemptyset_fast(&set);
-	
-	ASSERT_EQ(0, set);
-}
-
-TEST(sigfillset_fast) {
-	sigset_t set;
-	__sigfillset_fast(&set);
-	
-	ASSERT_NE(0, set);
-}
-
-TEST(sigaddset_fast) {
-	sigset_t set = 0;
-	
-	int result = __sigaddset_fast(&set, SIGINT);
-	ASSERT_EQ(0, result);
-	ASSERT_NE(0, set);
-}
-
-TEST(sigdelset_fast) {
-	sigset_t set = ~0UL;
-	
-	int result = __sigdelset_fast(&set, SIGINT);
-	ASSERT_EQ(0, result);
-}
-#endif
-
-/* ============================================================================
- * EDGE CASES
- * ============================================================================ */
-TEST_SUITE(edge_cases);
-
-TEST(signal_zero) {
-	// Signal 0 is special (null signal)
-	ASSERT_TRUE(SIGINT > 0);
-	ASSERT_TRUE(SIGTERM > 0);
-}
-
-TEST(signal_range) {
-	// All standard signals should be positive
-	ASSERT_TRUE(SIGABRT > 0);
-	ASSERT_TRUE(SIGFPE > 0);
-	ASSERT_TRUE(SIGILL > 0);
-	ASSERT_TRUE(SIGINT > 0);
-	ASSERT_TRUE(SIGSEGV > 0);
-	ASSERT_TRUE(SIGTERM > 0);
-}
-
-#if JACL_HAS_POSIX
-TEST(sigset_invalid_signal) {
-	sigset_t set;
-	sigemptyset(&set);
-	
-	// Invalid signal numbers should fail
-	ASSERT_EQ(-1, sigaddset(&set, 0));
-	ASSERT_EQ(-1, sigaddset(&set, 100));
-}
-#endif
-
-/* ============================================================================
- * C11 ATOMIC OPERATIONS
- * ============================================================================ */
 #if JACL_HAS_C11 && !defined(__STDC_NO_THREADS__)
-TEST_SUITE(c11_atomic);
-
-TEST(signal_atomic_store) {
+TEST(sig_atomic_t_store) {
 	sig_atomic_t val = 0;
 	signal_atomic_store(&val, 42);
 	ASSERT_EQ(42, val);
 }
 
-TEST(signal_atomic_load) {
+TEST(sig_atomic_t_load) {
 	sig_atomic_t val = 123;
 	sig_atomic_t loaded = signal_atomic_load(&val);
 	ASSERT_EQ(123, loaded);
@@ -421,14 +140,556 @@ TEST(signal_atomic_load) {
 #endif
 
 /* ============================================================================
- * C23 VERSION MACRO
+ * SIGNAL HANDLER TYPES
  * ============================================================================ */
-#if JACL_HAS_C23
-TEST_SUITE(c23_features);
+TEST_SUITE(types);
 
-TEST(version_macro_defined) {
-	ASSERT_EQ(202311L, __STDC_VERSION_SIGNAL_H__);
+TEST(types_sighandler_t) {
+	__sighandler_t handler = SIG_DFL;
+	ASSERT_EQ(SIG_DFL, handler);
+}
+
+TEST(types_sig_t) {
+	sig_t handler = SIG_IGN;
+	ASSERT_EQ(SIG_IGN, handler);
+}
+
+#if JACL_HAS_POSIX
+TEST(types_sigset_t_size) {
+	ASSERT_TRUE(sizeof(sigset_t) >= 16); /* 2 × 64-bit words */
+}
+
+TEST(types_sigval_int) {
+	union sigval val;
+	val.sival_int = 123;
+	ASSERT_EQ(123, val.sival_int);
+}
+
+TEST(types_sigval_ptr) {
+	union sigval val;
+	int dummy = 0;
+	val.sival_ptr = &dummy;
+	ASSERT_EQ(&dummy, val.sival_ptr);
+}
+
+TEST(types_siginfo_t_fields) {
+	siginfo_t info;
+
+	info.si_signo = SIGINT;
+	info.si_code = SI_USER;
+	info.si_value.sival_int = 42;
+	info.si_pid = 1234;
+	info.si_uid = 5678;
+
+	ASSERT_EQ(SIGINT, info.si_signo);
+	ASSERT_EQ(SI_USER, info.si_code);
+	ASSERT_EQ(42, info.si_value.sival_int);
+	ASSERT_EQ(1234, info.si_pid);
+	ASSERT_EQ(5678, info.si_uid);
+}
+
+TEST(types_sigaction_struct) {
+	struct sigaction act;
+
+	act.sa_handler = SIG_DFL;
+	act.sa_flags = 0;
+	sigemptyset(&act.sa_mask);
+
+	ASSERT_EQ(SIG_DFL, act.sa_handler);
+	ASSERT_TRUE(__sigisemptyset(&act.sa_mask));
+}
+#endif /* JACL_HAS_POSIX */
+
+/* ============================================================================
+ * RAISE FUNCTION
+ * ============================================================================ */
+TEST_SUITE(raise);
+
+static volatile sig_atomic_t raise_signal_received = 0;
+
+static void raise_test_handler(int sig) {
+	raise_signal_received = sig;
+}
+
+TEST(raise_with_handler) {
+	raise_signal_received = 0;
+
+	sig_t old = signal(SIGUSR1, raise_test_handler);
+	int result = raise(SIGUSR1);
+	signal(SIGUSR1, old);  /* Restore immediately */
+
+	ASSERT_EQ(0, result);
+	ASSERT_EQ(SIGUSR1, raise_signal_received);
+}
+
+TEST(raise_with_ignore) {
+	sig_t old = signal(SIGUSR2, SIG_IGN);
+	int result = raise(SIGUSR2);
+	signal(SIGUSR2, old);  /* Restore */
+
+	/* Should succeed even though signal is ignored */
+	ASSERT_EQ(0, result);
+}
+
+TEST(raise_multiple_different) {
+	raise_signal_received = 0;
+
+	sig_t old1 = signal(SIGUSR1, raise_test_handler);
+	raise(SIGUSR1);
+	ASSERT_EQ(SIGUSR1, raise_signal_received);
+	signal(SIGUSR1, old1);
+
+	sig_t old2 = signal(SIGUSR2, raise_test_handler);
+	raise(SIGUSR2);
+	ASSERT_EQ(SIGUSR2, raise_signal_received);
+	signal(SIGUSR2, old2);
+}
+
+/* ============================================================================
+ * SIGNAL FUNCTION
+ * ============================================================================ */
+TEST_SUITE(signal);
+
+static volatile sig_atomic_t signal_received = 0;
+
+static void signal_test_handler(int sig) {
+	signal_received = sig;
+}
+
+TEST(signal_set_handler) {
+	sig_t old = signal(SIGUSR1, signal_test_handler);
+	ASSERT_NE(SIG_ERR, old);
+	signal(SIGUSR1, old); /* Restore */
+}
+
+TEST(signal_set_default) {
+	sig_t old = signal(SIGUSR1, SIG_DFL);
+	ASSERT_NE(SIG_ERR, old);
+	signal(SIGUSR1, old); /* Restore */
+}
+
+TEST(signal_set_ignore) {
+	sig_t old = signal(SIGUSR1, SIG_IGN);
+	ASSERT_NE(SIG_ERR, old);
+	signal(SIGUSR1, old); /* Restore */
+}
+
+TEST(signal_restore_handler) {
+	sig_t old = signal(SIGUSR1, signal_test_handler);
+	sig_t restored = signal(SIGUSR1, old);
+
+	ASSERT_EQ(signal_test_handler, restored);
+	signal(SIGUSR1, old); /* Restore original */
+}
+
+/* ============================================================================
+ * POSIX SIGSET OPERATIONS
+ * ============================================================================ */
+#if JACL_HAS_POSIX
+
+/* ============================================================================
+ * SIGEMPTYSET FUNCTION
+ * ============================================================================ */
+TEST_SUITE(sigemptyset);
+
+TEST(sigemptyset_basic) {
+	sigset_t set;
+	int result = sigemptyset(&set);
+
+	ASSERT_EQ(0, result);
+	ASSERT_TRUE(__sigisemptyset(&set));
+}
+
+TEST(sigemptyset_null_pointer) {
+	errno = 0;
+	ASSERT_EQ(-1, sigemptyset(NULL));
+	ASSERT_EQ(EINVAL, errno);
+}
+
+TEST(sigemptyset_clears_all) {
+	sigset_t set;
+	sigfillset(&set);
+	sigemptyset(&set);
+
+	ASSERT_TRUE(__sigisemptyset(&set));
+	ASSERT_FALSE(sigismember(&set, SIGINT));
+	ASSERT_FALSE(sigismember(&set, SIGTERM));
+}
+
+#if JACL_HAS_C99
+TEST(sigemptyset_fast_helper) {
+	sigset_t set;
+	__sigemptyset_fast(&set);
+
+	ASSERT_TRUE(__sigisemptyset(&set));
 }
 #endif
+
+/* ============================================================================
+ * SIGFILLSET FUNCTION
+ * ============================================================================ */
+TEST_SUITE(sigfillset);
+
+TEST(sigfillset_basic) {
+	sigset_t set;
+	int result = sigfillset(&set);
+
+	ASSERT_EQ(0, result);
+	ASSERT_FALSE(__sigisemptyset(&set));
+}
+
+TEST(sigfillset_null_pointer) {
+	errno = 0;
+	ASSERT_EQ(-1, sigfillset(NULL));
+	ASSERT_EQ(EINVAL, errno);
+}
+
+TEST(sigfillset_sets_all) {
+	sigset_t set;
+	sigemptyset(&set);
+	sigfillset(&set);
+
+	ASSERT_TRUE(sigismember(&set, SIGINT));
+	ASSERT_TRUE(sigismember(&set, SIGTERM));
+	ASSERT_TRUE(sigismember(&set, SIGHUP));
+}
+
+#if JACL_HAS_C99
+TEST(sigfillset_fast_helper) {
+	sigset_t set;
+	__sigfillset_fast(&set);
+
+	ASSERT_FALSE(__sigisemptyset(&set));
+}
+#endif
+
+/* ============================================================================
+ * SIGADDSET FUNCTION
+ * ============================================================================ */
+TEST_SUITE(sigaddset);
+
+TEST(sigaddset_basic) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	int result = sigaddset(&set, SIGINT);
+	ASSERT_EQ(0, result);
+	ASSERT_TRUE(sigismember(&set, SIGINT));
+}
+
+/* Test multiple standard signals across platforms */
+#define TEST_SIGADDSET_FOR(sig) \
+	TEST(sigaddset_##sig) { \
+		sigset_t set; \
+		sigemptyset(&set); \
+		ASSERT_EQ(0, sigaddset(&set, sig)); \
+		ASSERT_TRUE(sigismember(&set, sig)); \
+	}
+
+TEST_SIGADDSET_FOR(SIGINT)
+TEST_SIGADDSET_FOR(SIGTERM)
+TEST_SIGADDSET_FOR(SIGHUP)
+TEST_SIGADDSET_FOR(SIGQUIT)
+TEST_SIGADDSET_FOR(SIGKILL)
+TEST_SIGADDSET_FOR(SIGUSR1)
+TEST_SIGADDSET_FOR(SIGUSR2)
+
+#undef TEST_SIGADDSET_FOR
+
+TEST(sigaddset_multiple) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	sigaddset(&set, SIGINT);
+	sigaddset(&set, SIGTERM);
+	sigaddset(&set, SIGHUP);
+
+	ASSERT_TRUE(sigismember(&set, SIGINT));
+	ASSERT_TRUE(sigismember(&set, SIGTERM));
+	ASSERT_TRUE(sigismember(&set, SIGHUP));
+}
+
+TEST(sigaddset_null_pointer) {
+	errno = 0;
+	ASSERT_EQ(-1, sigaddset(NULL, SIGINT));
+	ASSERT_EQ(EINVAL, errno);
+}
+
+TEST(sigaddset_invalid_zero) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	errno = 0;
+	ASSERT_EQ(-1, sigaddset(&set, 0));
+	ASSERT_EQ(EINVAL, errno);
+}
+
+TEST(sigaddset_invalid_high) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	errno = 0;
+	ASSERT_EQ(-1, sigaddset(&set, JACL_SIGSET_MAX + 1));
+	ASSERT_EQ(EINVAL, errno);
+}
+
+TEST(sigaddset_boundary_first) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	ASSERT_EQ(0, sigaddset(&set, 1));
+	ASSERT_TRUE(sigismember(&set, 1));
+}
+
+TEST(sigaddset_boundary_word) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	ASSERT_EQ(0, sigaddset(&set, 64));
+	ASSERT_TRUE(sigismember(&set, 64));
+
+	ASSERT_EQ(0, sigaddset(&set, 65));
+	ASSERT_TRUE(sigismember(&set, 65));
+}
+
+TEST(sigaddset_bit_isolation) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	sigaddset(&set, SIGINT);
+
+	ASSERT_TRUE(sigismember(&set, SIGINT));
+
+	/* Only test isolation if we can safely check neighbors */
+	if (SIGINT > 1) {
+		ASSERT_FALSE(sigismember(&set, SIGINT - 1));
+	}
+	if (SIGINT < JACL_SIGSET_MAX) {
+		ASSERT_FALSE(sigismember(&set, SIGINT + 1));
+	}
+}
+
+#if JACL_HAS_C99
+TEST(sigaddset_fast_helper) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	int result = __sigaddset_fast(&set, SIGINT);
+	ASSERT_EQ(0, result);
+	ASSERT_TRUE(sigismember(&set, SIGINT));
+}
+#endif
+
+/* ============================================================================
+ * SIGDELSET FUNCTION
+ * ============================================================================ */
+TEST_SUITE(sigdelset);
+
+TEST(sigdelset_basic) {
+	sigset_t set;
+	sigfillset(&set);
+
+	int result = sigdelset(&set, SIGINT);
+	ASSERT_EQ(0, result);
+	ASSERT_FALSE(sigismember(&set, SIGINT));
+}
+
+TEST(sigdelset_from_empty) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	int result = sigdelset(&set, SIGINT);
+	ASSERT_EQ(0, result);
+	ASSERT_FALSE(sigismember(&set, SIGINT));
+}
+
+TEST(sigdelset_null_pointer) {
+	errno = 0;
+	ASSERT_EQ(-1, sigdelset(NULL, SIGINT));
+	ASSERT_EQ(EINVAL, errno);
+}
+
+TEST(sigdelset_invalid_zero) {
+	sigset_t set;
+	sigfillset(&set);
+
+	errno = 0;
+	ASSERT_EQ(-1, sigdelset(&set, 0));
+	ASSERT_EQ(EINVAL, errno);
+}
+
+TEST(sigdelset_invalid_high) {
+	sigset_t set;
+	sigfillset(&set);
+
+	errno = 0;
+	ASSERT_EQ(-1, sigdelset(&set, JACL_SIGSET_MAX + 1));
+	ASSERT_EQ(EINVAL, errno);
+}
+
+#if JACL_HAS_C99
+TEST(sigdelset_fast_helper) {
+	sigset_t set;
+	sigfillset(&set);
+
+	int result = __sigdelset_fast(&set, SIGINT);
+	ASSERT_EQ(0, result);
+	ASSERT_FALSE(sigismember(&set, SIGINT));
+}
+#endif
+
+/* ============================================================================
+ * SIGISMEMBER FUNCTION
+ * ============================================================================ */
+TEST_SUITE(sigismember);
+
+TEST(sigismember_present) {
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGINT);
+
+	ASSERT_TRUE(sigismember(&set, SIGINT));
+}
+
+TEST(sigismember_absent) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	ASSERT_FALSE(sigismember(&set, SIGINT));
+}
+
+TEST(sigismember_add_remove) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	sigaddset(&set, SIGINT);
+	ASSERT_TRUE(sigismember(&set, SIGINT));
+
+	sigdelset(&set, SIGINT);
+	ASSERT_FALSE(sigismember(&set, SIGINT));
+}
+
+TEST(sigismember_null_pointer) {
+	errno = 0;
+	ASSERT_EQ(-1, sigismember(NULL, SIGINT));
+	ASSERT_EQ(EINVAL, errno);
+}
+
+TEST(sigismember_invalid_zero) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	errno = 0;
+	ASSERT_EQ(-1, sigismember(&set, 0));
+	ASSERT_EQ(EINVAL, errno);
+}
+
+TEST(sigismember_invalid_high) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	errno = 0;
+	ASSERT_EQ(-1, sigismember(&set, JACL_SIGSET_MAX + 1));
+	ASSERT_EQ(EINVAL, errno);
+}
+
+/* ============================================================================
+ * SIGACTION FUNCTION
+ * ============================================================================ */
+TEST_SUITE(sigaction);
+
+TEST(sigaction_flags_restart) {
+	struct sigaction act;
+
+	act.sa_flags = SA_RESTART;
+	ASSERT_EQ(SA_RESTART, act.sa_flags);
+}
+
+TEST(sigaction_flags_nocldstop) {
+	struct sigaction act;
+
+	act.sa_flags = SA_NOCLDSTOP;
+	ASSERT_EQ(SA_NOCLDSTOP, act.sa_flags);
+}
+
+TEST(sigaction_flags_combined) {
+	struct sigaction act;
+
+	act.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+	ASSERT_TRUE(act.sa_flags & SA_RESTART);
+	ASSERT_TRUE(act.sa_flags & SA_NOCLDSTOP);
+}
+
+TEST(sigaction_mask_operations) {
+	struct sigaction act;
+	sigemptyset(&act.sa_mask);
+
+	sigaddset(&act.sa_mask, SIGINT);
+	sigaddset(&act.sa_mask, SIGTERM);
+
+	ASSERT_TRUE(sigismember(&act.sa_mask, SIGINT));
+	ASSERT_TRUE(sigismember(&act.sa_mask, SIGTERM));
+}
+
+/* ============================================================================
+ * SIGSET INTEGRITY
+ * ============================================================================ */
+TEST_SUITE(sigset_integrity);
+
+TEST(sigset_integrity_capacity) {
+	ASSERT_TRUE(JACL_SIGSET_MAX >= 64);
+}
+
+TEST(sigset_integrity_independent_bits) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	/* Add every 8th signal up to 64 */
+	for (int sig = 1; sig <= 64 && sig <= JACL_SIGSET_MAX; sig += 8) {
+		sigaddset(&set, sig);
+	}
+
+	/* Verify only those are set */
+	for (int sig = 1; sig <= 64 && sig <= JACL_SIGSET_MAX; sig++) {
+		if (sig % 8 == 1) {
+			ASSERT_TRUE(sigismember(&set, sig));
+		} else {
+			ASSERT_FALSE(sigismember(&set, sig));
+		}
+	}
+}
+
+TEST(sigset_integrity_word_boundary) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	/* Test across 64-bit word boundary */
+	if (JACL_SIGSET_MAX >= 65) {
+		sigaddset(&set, 64);
+		sigaddset(&set, 65);
+
+		ASSERT_TRUE(sigismember(&set, 64));
+		ASSERT_TRUE(sigismember(&set, 65));
+		ASSERT_FALSE(sigismember(&set, 63));
+
+		if (JACL_SIGSET_MAX >= 66) {
+			ASSERT_FALSE(sigismember(&set, 66));
+		}
+	}
+}
+
+#if JACL_HAS_C99
+TEST(sigset_integrity_isempty_helper) {
+	sigset_t set;
+	sigemptyset(&set);
+
+	ASSERT_TRUE(__sigisemptyset(&set));
+
+	sigaddset(&set, SIGINT);
+	ASSERT_FALSE(__sigisemptyset(&set));
+}
+#endif
+
+#endif /* JACL_HAS_POSIX */
 
 TEST_MAIN()

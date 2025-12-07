@@ -16,6 +16,8 @@
 #include <core/fenv.h>
 #include <core/stdio.h>
 #include <core/stdlib.h>
+#include <core/pthread.h>
+#include <core/complex.h>
 #include <core/jsio.h>
 #include <core/start.h>
 

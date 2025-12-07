@@ -46,6 +46,17 @@
 		"clrrwi 1, 1, 4\n"
 		"bl _start_main\n"
 	);
+
+	#if JACL_OS_LINUX
+		__asm__(
+			".text\n"
+			".globl __restore_rt\n"
+			".type __restore_rt,@function\n"
+			"__restore_rt:\n"
+			"li 0, 173\n"
+			"sc\n"
+		);
+	#endif
 #undef __ARCH_START
 #endif
 

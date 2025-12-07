@@ -47,6 +47,17 @@
 		"lda $30, -16($30)\n"
 		"bsr $26, _start_main\n"
 	);
+
+	#if JACL_OS_LINUX
+		__asm__(
+			".text\n"
+			".globl __restore_rt\n"
+			".type __restore_rt,@function\n"
+			"__restore_rt:\n"
+			"lda $0, 298\n"
+			"callsys\n"
+		);
+	#endif
 #undef __ARCH_START
 #endif
 
@@ -68,4 +79,3 @@
 #ifdef __cplusplus
 	}
 #endif
-

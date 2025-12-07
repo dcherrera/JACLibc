@@ -14,10 +14,9 @@
 
 #ifdef __OS_SYSCALL
 	struct __jacl_openbsd_libc {
-	#define X(SYS, num, fn, rettype, params, ...) \
-		rettype (*fn##_)params;
-	#include "x/openbsd_syscalls.h"
-	#undef X
+		#define X(SYS, num, fn, rettype, params, ...) rettype (*fn##_)params;
+		#include JACL_X_SYSCALL
+		#undef X
 	};
 
 	extern struct __jacl_openbsd_libc _openbsd;
@@ -29,7 +28,7 @@
 		switch (n) {
 		#define X(SYS, num, fn, rettype, params, ...) \
 			case SYS: return (long)_openbsd.fn##_(__VA_ARGS__);
-		#include "x/openbsd_syscalls.x"
+		#include JACL_X_SYSCALL
 		#undef X
 		default:
 			errno = ENOSYS;
@@ -44,7 +43,7 @@
 	struct __jacl_openbsd_libc {
 	#define X(SYS, num, fn, rettype, params, ...) \
 		rettype (*fn##_)params;
-	#include "x/openbsd_syscalls.h"
+	#include JACL_X_SYSCALL
 	#undef X
 	};
 
@@ -57,7 +56,7 @@
 
 	#define X(SYS, num, fn, rettype, params, ...) \
 		_openbsd.fn##_ = (rettype(*)params)dlsym(h, #fn);
-	#include "x/openbsd_syscalls.x"
+	#include JACL_X_SYSCALL
 	#undef X
 	}
 

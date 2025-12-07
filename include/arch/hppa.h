@@ -48,6 +48,18 @@
 		"bl _start_main, %r2\n"
 		"nop\n"
 	);
+
+	#if JACL_OS_LINUX
+		__asm__(
+			".text\n"
+			".globl __restore_rt\n"
+			".type __restore_rt,@function\n"
+			"__restore_rt:\n"
+			"ldi 173, %r20\n"
+			"ble 0x100(%%sr2, %%r0)\n"
+			"nop\n"
+		);
+	#endif
 #undef __ARCH_START
 #endif
 

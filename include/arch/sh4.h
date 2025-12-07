@@ -49,6 +49,17 @@
 		"bsr _start_main\n"
 		"nop\n"
 	);
+
+	#if JACL_OS_LINUX
+		__asm__(
+			".text\n"
+			".globl __restore_rt\n"
+			".type __restore_rt,@function\n"
+			"__restore_rt:\n"
+			"mov #173, r3\n"
+			"trapa #31\n"
+		);
+	#endif
 #undef __ARCH_START
 #endif
 
@@ -70,4 +81,3 @@
 #ifdef __cplusplus
 	}
 #endif
-

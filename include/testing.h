@@ -223,6 +223,7 @@ static inline void __jacl_test_run(test_suite_t *suite, test_t *t) {
 		if (print_this) printf("%s[SKIP]%s\n", __jacl_test_color() ? COLOR_SKIP : "", __jacl_test_color() ? COLOR_NORM : "");
 		if (print_this) printf("\n%s%s%s\n\n", __jacl_test_color() ? COLOR_SKIP : "", __jacl_test_error, __jacl_test_color() ? COLOR_NORM : "");
 
+		__jacl_test_stats.skipped++;
 		suite->stats.skipped++;
 	} else if (__jacl_test_failed) {
 		if (print_this) printf("%s[FAIL]%s\n", __jacl_test_color() ? COLOR_FAIL : "", __jacl_test_color() ? COLOR_NORM : "");

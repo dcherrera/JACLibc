@@ -46,6 +46,17 @@
 		"andq $-16,%rsp\n"
 		"call _start_main\n"
 	);
+
+	#if JACL_OS_LINUX
+		__asm__(
+			".text\n"
+			".globl __restore_rt\n"
+			".type __restore_rt,@function\n"
+			"__restore_rt:\n"
+			"mov $15, %rax\n"
+			"syscall\n"
+		);
+	#endif
 #undef __ARCH_START
 #endif
 

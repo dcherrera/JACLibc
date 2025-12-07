@@ -14,18 +14,6 @@
 extern "C" {
 #endif
 
-#ifndef complex
-# define complex _Complex
-#endif
-
-#ifndef _Complex_I
-	#define _Complex_I (0.0f+1.0fi)
-#endif
-
-#ifndef I
-# define I _Complex_I
-#endif
-
 #if JACL_HAS_C11
 	#define CMPLX(x, y) ((double complex)((double)(x) + I * (double)(y)))
 	#define CMPLXF(x, y) ((float complex)((float)(x) + I * (float)(y)))
@@ -50,7 +38,7 @@ extern "C" {
 #define __jacl_cproj(type, suf) static inline type complex cproj##suf(type complex z) { \
 	if (isfinite(creal##suf(z)) && isfinite(cimag##suf(z))) return z; \
 	if (isnan(creal##suf(z)) || isnan(cimag##suf(z))) return z; \
-	return (type complex)INFINITY + (type)0.0 * cimag##suf(z); \
+	return (type complex)INFINITY + I * (type)0.0; \
 }
 
 /* ================================================================ */

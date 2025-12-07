@@ -1,5 +1,5 @@
 /**
- * OPENBSD SYSCALLS IMPORTED  //  last updated: 2025-11-28 20:09:30 UTC
+ * OPENBSD SYSCALLS IMPORTED  //  last updated: 2025-12-03 04:08:58 UTC
  * https://cvsweb.openbsd.org/cgi-bin/cvsweb/~checkout~/src/sys/kern/syscalls.master
  */
 

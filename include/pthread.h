@@ -13,7 +13,6 @@
 #if JACL_HAS_C11
 	#include <stdatomic.h>
 #else
-	#define ATOMIC_VAR_INIT(x) (x)
 	#define atomic_load(ptr) (*(ptr))
 	#define atomic_store(ptr, val) (*(ptr) = (val))
 	#define atomic_fetch_add(ptr, val) ((*(ptr))++)
@@ -40,7 +39,6 @@ extern "C" {
 	#include <sys/wait.h>
 	#include <sys/mman.h>
 	#include <sys/syscall.h>
-	#define pthread_syscall syscall
 #else
 	#define PTHREAD_DUMMY 1
 #endif
@@ -54,28 +52,15 @@ extern "C" {
 /* COMMON TYPES AND CONSTANTS                                       */
 /* ================================================================ */
 
-/* Thread attributes */
-typedef struct {
-	int detached;
-	size_t stack_size;
-	void *stack_addr;
-} pthread_attr_t;
-
-/* Mutex attributes */
-typedef struct {
-	int type;
-} pthread_mutexattr_t;
-
-/* Condition attributes */
-typedef struct {
-	int dummy;
-} pthread_condattr_t;
-
-/* Once flag */
-typedef struct {
-	_Atomic int done;
-} pthread_once_t;
-
+/* Constants */
+#define PTHREAD_CREATE_JOINABLE 0
+#define PTHREAD_CREATE_DETACHED 1
+#define PTHREAD_DESTRUCTOR_ITERATIONS 4
+#define PTHREAD_MUTEX_NORMAL    0
+#define PTHREAD_MUTEX_RECURSIVE 1
+#define PTHREAD_MUTEX_ERRORCHECK 2
+#define PTHREAD_ONCE_INIT {0}
+#define MAX_TLS_KEYS 64
 
 /* platform dependent types */
 #if PTHREAD_WIN32
@@ -99,7 +84,7 @@ typedef DWORD pthread_key_t;
 
 #elif PTHREAD_POSIX
 
-typedef struct {
+struct __jacl_pthread {
 	pid_t tid;
 	void *stack;
 	size_t stack_size;
@@ -107,7 +92,9 @@ typedef struct {
 	_Atomic int finished;
 	_Atomic int detached;
 	_Atomic int joined;
-} pthread_t;
+};
+
+typedef struct __jacl_pthread *pthread_t;
 
 typedef struct {
 	_Atomic int futex;
@@ -123,6 +110,13 @@ typedef struct {
 
 typedef unsigned int pthread_key_t;
 
+/* Global pthread TLS state - defined once in core/pthread.h */
+extern _Atomic unsigned int __jacl_pthread_tls_key_counter;
+extern thread_local void *__jacl_pthread_tls_values[MAX_TLS_KEYS];
+extern pthread_key_t __jacl_pthread_self_key;
+extern void (*__jacl_pthread_key_destructors[MAX_TLS_KEYS])(void *);
+extern _Atomic int __jacl_pthread_inited;
+
 #else /* PTHREAD_DUMMY */
 
 typedef struct { int dummy; } pthread_t;
@@ -132,18 +126,39 @@ typedef int pthread_key_t;
 
 #endif /* platform dependent types */
 
-/* Constants */
-#define PTHREAD_CREATE_JOINABLE 0
-#define PTHREAD_CREATE_DETACHED 1
-#define PTHREAD_MUTEX_NORMAL    0
-#define PTHREAD_MUTEX_RECURSIVE 1
-#define PTHREAD_MUTEX_ERRORCHECK 2
+/* Thread attributes */
+typedef struct {
+	int detached;
+	size_t stack_size;
+	void *stack_addr;
+} pthread_attr_t;
 
-#define PTHREAD_ONCE_INIT {ATOMIC_VAR_INIT(0)}
+/* Thread args */
+struct posix_thread_arg {
+	void *(*start_routine)(void *);
+	void *arg;
+	pthread_t thread_ptr;
+};
+
+/* Mutex attributes */
+typedef struct {
+	int type;
+} pthread_mutexattr_t;
+
+/* Condition attributes */
+typedef struct {
+	int dummy;
+} pthread_condattr_t;
+
+/* Once flag */
+typedef struct {
+	_Atomic int done;
+} pthread_once_t;
 
 /* ================================================================ */
 /* WINDOWS IMPLEMENTATION                                           */
 /* ================================================================ */
+
 
 #if PTHREAD_WIN32
 
@@ -241,7 +256,9 @@ static inline int pthread_mutex_unlock(pthread_mutex_t *mutex) {
 
 static inline int pthread_mutex_destroy(pthread_mutex_t *mutex) {
 	if (!mutex) return EINVAL;
+
 	DeleteCriticalSection(&mutex->cs);
+
 	return 0;
 }
 
@@ -271,7 +288,8 @@ static inline int pthread_cond_broadcast(pthread_cond_t *cond) {
 }
 
 static inline int pthread_cond_destroy(pthread_cond_t *cond) {
-	(void)cond;
+	if (!cond) return EINVAL;
+
 	return 0;
 }
 
@@ -301,186 +319,306 @@ static inline void *pthread_getspecific(pthread_key_t key) {
 
 #elif PTHREAD_POSIX
 
-/* Helper functions */
-static inline pid_t pthread_gettid(void) {
-#if defined(SYS_gettid)
-	return (pid_t)pthread_syscall(SYS_gettid);
-#elif defined(__APPLE__)
-	uint64_t tid;
-	pthread_threadid_np(NULL, &tid);
-	return (pid_t)tid;
-#else
-	return getpid();
-#endif
-}
-
-static inline int pthread_futex_wait(void *addr, int val) {
-#if defined(SYS_futex)
-	return pthread_syscall(SYS_futex, addr, FUTEX_WAIT, val, NULL, NULL, 0);
-#else
-	(void)addr; (void)val;
-	struct timespec ts = {0, 1000000}; /* 1ms */
-	nanosleep(&ts, NULL);
-	return 0;
-#endif
-}
-
-static inline int pthread_futex_wake(void *addr, int num) {
-#if defined(SYS_futex)
-	return pthread_syscall(SYS_futex, addr, FUTEX_WAKE, num, NULL, NULL, 0);
-#else
-	(void)addr; (void)num;
-	return 0;
-#endif
-}
-
-static inline pid_t pthread_clone_thread(void *stack, size_t stack_size, int (*fn)(void *), void *arg) {
-#if defined(SYS_clone)
-	return (pid_t)pthread_syscall(SYS_clone,
-		CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD,
-		(char*)stack + stack_size, NULL, NULL, 0);
-#else
-	(void)stack; (void)stack_size;
-	pid_t pid = fork();
-	if (pid == 0) {
-		fn(arg);
-		exit(0);
+#if JACL_OS_LINUX
+	/* linux: direct syscalls */
+	static inline pid_t __jacl_pthread_gettid(void) {
+		return (pid_t)syscall(SYS_gettid);
 	}
-	return pid;
+
+	static inline int __jacl_pthread_futex_wait(void *addr, int val) {
+		return syscall(SYS_futex, addr, FUTEX_WAIT, val, NULL, NULL, 0);
+	}
+
+	static inline int __jacl_pthread_futex_wake(void *addr, int num) {
+		return syscall(SYS_futex, addr, FUTEX_WAKE, num, NULL, NULL, 0);
+	}
+
+#elif JACL_OS_DARWIN
+	/* Darwin: direct syscalls (no libc wrappers) */
+	static inline pid_t __jacl_pthread_gettid(void) {
+		return (pid_t)syscall(SYS_thread_selfid);
+	}
+
+	extern int __ulock_wait(uint32_t operation, void *addr, uint64_t value, uint32_t timeout);
+	extern int __ulock_wake(uint32_t operation, void *addr);
+
+	static inline int __jacl_pthread_futex_wait(void *addr, int val) {
+		return syscall(SYS_ulock_wait, 1, addr, val, 0);
+	}
+
+	static inline int __jacl_pthread_futex_wake(void *addr, int num) {
+		uint32_t op = (num == 1) ? 0x101 : 0x100;  // UL_WAKE vs UL_WAKE_ALL
+		return syscall(SYS_ulock_wake, op, addr);
+	}
+
+#elif JACL_OS_FREEBSD
+	/* FreeBSD: direct syscall */
+	static inline pid_t __jacl_pthread_gettid(void) {
+		long tid;
+		syscall(SYS_thr_self, &tid);
+		return (pid_t)tid;
+	}
+
+	static inline int __jacl_pthread_futex_wait(void *addr, int val) {
+		return syscall(SYS__umtx_op, addr, 3 /* UMTX_OP_WAIT */, val, NULL, NULL);
+	}
+
+	static inline int __jacl_pthread_futex_wake(void *addr, int num) {
+		return syscall(SYS__umtx_op, addr, 4 /* UMTX_OP_WAKE */, num, NULL, NULL);
+	}
+
+#else
+	/* Unknown OS: use getpid() and no-ops for now */
+	static inline pid_t __jacl_pthread_gettid(void) { return getpid(); }
+	static inline int __jacl_pthread_futex_wait(void *addr, int val) { return -1; }
+	static inline int __jacl_pthread_futex_wake(void *addr, int num) { return -1; }
 #endif
+
+static inline void __jacl_pthread_init(void) {
+	int expected = 0;
+
+	if (atomic_compare_exchange_strong(&__jacl_pthread_inited, &expected, 1)) {
+		/* Create TLS key for pthread_self storage */
+		__jacl_pthread_self_key = atomic_fetch_add(&__jacl_pthread_tls_key_counter, 1);
+		if (__jacl_pthread_self_key >= MAX_TLS_KEYS) return;
+
+		/* Create main thread's pthread_t handle */
+		pthread_t t = calloc(1, sizeof *t);
+		if (!t) return;
+
+		t->tid        = __jacl_pthread_gettid();
+		t->stack      = NULL;
+		t->stack_size = 0;
+		t->result     = NULL;
+		atomic_store(&t->finished, 0);
+		atomic_store(&t->detached, 0);
+		atomic_store(&t->joined, 0);
+
+		/* Store directly in TLS array */
+		__jacl_pthread_tls_values[__jacl_pthread_self_key] = t;
+	}
 }
 
-/* Thread functions */
-struct posix_thread_arg {
-	void *(*start_routine)(void *);
-	void *arg;
-	pthread_t *thread_ptr;
-};
+static inline void __jacl_pthread_destroy(void) {
+	int iterations = PTHREAD_DESTRUCTOR_ITERATIONS;
+	int had_values;
 
-static int thread_entry(void *arg) {
+	do {
+		had_values = 0;
+
+		for (unsigned int i = 0; i < atomic_load(&__jacl_pthread_tls_key_counter) && i < MAX_TLS_KEYS; i++) {
+			void *value = __jacl_pthread_tls_values[i];
+			void (*destructor)(void *) = __jacl_pthread_key_destructors[i];
+
+			if (value && destructor) {
+				__jacl_pthread_tls_values[i] = NULL;
+				destructor(value);
+
+				had_values = 1;
+			}
+		}
+	} while (had_values && --iterations > 0);
+}
+
+static inline void __jacl_pthread_set_self(pthread_t thread_ptr) {
+	if (__jacl_pthread_self_key < MAX_TLS_KEYS) __jacl_pthread_tls_values[__jacl_pthread_self_key] = thread_ptr;
+}
+
+static inline pthread_t *__jacl_pthread_get_self_ptr(void) {
+	__jacl_pthread_init();
+
+	if (__jacl_pthread_self_key < MAX_TLS_KEYS) return (pthread_t *)__jacl_pthread_tls_values[__jacl_pthread_self_key];
+
+	return NULL;
+}
+
+static inline int __jacl_pthread_entry(void *arg) {
 	struct posix_thread_arg *ta = (struct posix_thread_arg *)arg;
+
+	__jacl_pthread_set_self(ta->thread_ptr);
+
 	void *result = ta->start_routine(ta->arg);
 
 	ta->thread_ptr->result = result;
-	atomic_store(&ta->thread_ptr->finished, 1);
-	free(ta);
 
-#if defined(SYS_exit)
-	pthread_syscall(SYS_exit, (long)(uintptr_t)result);
-#else
-	exit((int)(uintptr_t)result);
-#endif
-	return 0;
+	atomic_store(&ta->thread_ptr->finished, 1);
+
+	__jacl_pthread_destroy();
+
+	free(ta);
+	_exit(0);
 }
 
-static inline int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
-                                void *(*start_routine)(void *), void *arg) {
+static inline pid_t __jacl_pthread_clone_thread(void *stack, size_t stack_size, int (*fn)(void *), void *arg) {
+	#if JACL_OS_LINUX
+		/* child stack grows downward; clone expects pointer to top */
+		char *stack_top = (char *)stack + stack_size;
+		int flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
+		long tid = syscall(SYS_clone, flags, stack_top, NULL, NULL, NULL);
+
+		return (pid_t)tid;
+	#else
+		(void)stack;
+		(void)stack_size;
+
+		pid_t pid = fork();
+
+		if (pid == 0) {
+			fn(arg);
+			_exit(0);
+		}
+
+		return pid;
+	#endif
+}
+
+
+/* Thread functions */
+static inline int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg) {
 	if (!thread || !start_routine) return EINVAL;
 
-	struct posix_thread_arg *ta = malloc(sizeof(*ta));
-	if (!ta) return ENOMEM;
+	__jacl_pthread_init();
 
-	size_t stack_size = (attr && attr->stack_size) ? attr->stack_size : 1024*1024;
+	pthread_t t = calloc(1, sizeof *t);
+
+	if (!t) return ENOMEM;
+
+	struct posix_thread_arg *ta = malloc(sizeof *ta);
+
+	if (!ta) { free(t); return ENOMEM; }
+
+	size_t stack_size = (attr && attr->stack_size) ? attr->stack_size : 1024 * 1024;
 	void *stack = NULL;
 
-#if JACL_OS_LINUX
-	stack = mmap(NULL, stack_size, PROT_READ | PROT_WRITE,
-	             MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
-	if (stack == MAP_FAILED) stack = NULL;
-#endif
+	#if JACL_OS_LINUX
+		stack = mmap(NULL, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
+
+		if (stack == MAP_FAILED) stack = NULL;
+	#endif
 
 	if (!stack) {
 		stack = malloc(stack_size);
+
 		if (!stack) {
 			free(ta);
+			free(t);
+
 			return ENOMEM;
 		}
 	}
 
 	ta->start_routine = start_routine;
-	ta->arg = arg;
-	ta->thread_ptr = thread;
+	ta->arg           = arg;
+	ta->thread_ptr    = t;
 
-	thread->stack = stack;
-	thread->stack_size = stack_size;
-	thread->result = NULL;
-	atomic_store(&thread->finished, 0);
-	atomic_store(&thread->detached, (attr && attr->detached) ? 1 : 0);
-	atomic_store(&thread->joined, 0);
+	t->stack      = stack;
+	t->stack_size = stack_size;
+	t->result     = NULL;
 
-	pid_t tid = pthread_clone_thread(stack, stack_size, thread_entry, ta);
+	atomic_store(&t->finished, 0);
+	atomic_store(&t->detached, (attr && attr->detached) ? 1 : 0);
+	atomic_store(&t->joined,   0);
+
+	pid_t tid = __jacl_pthread_clone_thread(stack, stack_size, __jacl_pthread_entry, ta);
 
 	if (tid > 0) {
-		thread->tid = tid;
+		t->tid = tid;
+		*thread = t;
 		return 0;
 	} else {
-#if JACL_OS_LINUX
-		if (stack != malloc(stack_size)) {
-			munmap(stack, stack_size);
-		} else
-#endif
-		free(stack);
+		#if JACL_OS_LINUX
+			/* We know stack_size, we just mapped/alloc’d it. */
+			if (stack) munmap(stack, stack_size);
+		#else
+			free(stack);
+		#endif
+
 		free(ta);
+		free(t);
+
 		return EAGAIN;
 	}
 }
 
 static inline int pthread_join(pthread_t thread, void **retval) {
-	if (atomic_load(&thread.detached)) return EINVAL;
+	if (!thread) return EINVAL;
+	if (atomic_load(&thread->detached)) return EINVAL;
+
+	__jacl_pthread_init();
 
 	int expected = 0;
-	if (!atomic_compare_exchange_strong(&thread.joined, &expected, 1)) {
-		return EINVAL;
-	}
+	struct timespec ts = {0, 1000000}; /* 1ms */
 
-	while (!atomic_load(&thread.finished)) {
-		struct timespec ts = {0, 1000000}; /* 1ms */
-		nanosleep(&ts, NULL);
-	}
+	if (!atomic_compare_exchange_strong(&thread->joined, &expected, 1)) return EINVAL;
+	while (!atomic_load(&thread->finished)) nanosleep(&ts, NULL);
+	if (retval) *retval = thread->result;
 
-	if (retval) *retval = thread.result;
+	#if JACL_OS_LINUX
+		if (thread->stack && thread->stack_size && munmap(thread->stack, thread->stack_size) != 0) free(thread->stack);
+	#else
+		free(thread->stack);
+	#endif
 
-#if JACL_OS_LINUX
-	if (munmap(thread.stack, thread.stack_size) != 0) {
-		free(thread.stack);
-	}
-#else
-	free(thread.stack);
-#endif
+	free(thread);
 
 	return 0;
 }
 
-static inline void pthread_exit(void *retval) {
-#if defined(SYS_exit)
-	pthread_syscall(SYS_exit, (long)(uintptr_t)retval);
-#else
-	exit((int)(uintptr_t)retval);
-#endif
+static inline pthread_t pthread_self(void) {
+	pthread_t *ptr = __jacl_pthread_get_self_ptr();
+
+	if (ptr) return *ptr;
+
+	return NULL;
 }
 
-static inline pthread_t pthread_self(void) {
-	pthread_t self = {0};
-	self.tid = pthread_gettid();
-	return self;
+static inline void pthread_exit(void *retval) {
+		pthread_t self = pthread_self();
+
+	if (self) {
+		self->result = retval;
+		atomic_store(&self->finished, 1);
+	}
+
+	__jacl_pthread_destroy();
+
+	_exit(0);
 }
 
 static inline int pthread_equal(pthread_t t1, pthread_t t2) {
-	return t1.tid == t2.tid;
+	return t1 == t2;
 }
 
 static inline int pthread_detach(pthread_t thread) {
-	atomic_store(&thread.detached, 1);
+	if (!thread) return EINVAL;
+
+	__jacl_pthread_init();
+	int expected = 0;
+
+	if (!atomic_compare_exchange_strong(&thread->detached, &expected, 1)) return EINVAL; /* already detached */
+
+	if (atomic_load(&thread->finished)) {
+		#if JACL_OS_LINUX
+			if (thread->stack && thread->stack_size && munmap(thread->stack, thread->stack_size) != 0) free(thread->stack);
+		#else
+			free(thread->stack);
+		#endif
+		free(thread);
+	}
+
 	return 0;
 }
 
 /* Mutex functions */
 static inline int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr) {
 	if (!mutex) return EINVAL;
+
 	atomic_store(&mutex->futex, 0);
+
 	mutex->owner = 0;
 	mutex->type = (attr && attr->type) ? attr->type : PTHREAD_MUTEX_NORMAL;
 	mutex->recursive_count = 0;
+
 	return 0;
 }
 
@@ -488,9 +626,11 @@ static inline int pthread_mutex_lock(pthread_mutex_t *mutex) {
 	if (!mutex) return EINVAL;
 
 	if (mutex->type == PTHREAD_MUTEX_RECURSIVE) {
-		pid_t current_tid = pthread_gettid();
+		pid_t current_tid = __jacl_pthread_gettid();
+
 		if (mutex->owner == current_tid) {
 			mutex->recursive_count++;
+
 			return 0;
 		}
 	}
@@ -501,15 +641,17 @@ static inline int pthread_mutex_lock(pthread_mutex_t *mutex) {
 	while (!atomic_compare_exchange_weak(&mutex->futex, &expected, 1)) {
 		expected = 0;
 
-		if (pthread_futex_wait(&mutex->futex, 1) != 0) {
+		if (__jacl_pthread_futex_wait(&mutex->futex, 1) != 0) {
 			struct timespec ts = {0, backoff};
+
 			nanosleep(&ts, NULL);
+
 			if (backoff < 1000000) backoff *= 2;
 		}
 	}
 
 	if (mutex->type == PTHREAD_MUTEX_RECURSIVE) {
-		mutex->owner = pthread_gettid();
+		mutex->owner = __jacl_pthread_gettid();
 		mutex->recursive_count = 1;
 	}
 
@@ -518,14 +660,18 @@ static inline int pthread_mutex_lock(pthread_mutex_t *mutex) {
 
 static inline int pthread_mutex_trylock(pthread_mutex_t *mutex) {
 	if (!mutex) return EINVAL;
+
 	int expected = 0;
+
 	if (atomic_compare_exchange_strong(&mutex->futex, &expected, 1)) {
 		if (mutex->type == PTHREAD_MUTEX_RECURSIVE) {
-			mutex->owner = pthread_gettid();
+			mutex->owner = __jacl_pthread_gettid();
 			mutex->recursive_count = 1;
 		}
+
 		return 0;
 	}
+
 	return EBUSY;
 }
 
@@ -535,28 +681,35 @@ static inline int pthread_mutex_unlock(pthread_mutex_t *mutex) {
 	if (mutex->type == PTHREAD_MUTEX_RECURSIVE) {
 		if (mutex->recursive_count > 1) {
 			mutex->recursive_count--;
+
 			return 0;
 		}
+
 		mutex->owner = 0;
 		mutex->recursive_count = 0;
 	}
 
 	atomic_store(&mutex->futex, 0);
-	pthread_futex_wake(&mutex->futex, 1);
+	__jacl_pthread_futex_wake(&mutex->futex, 1);
+
 	return 0;
 }
 
 static inline int pthread_mutex_destroy(pthread_mutex_t *mutex) {
-	(void)mutex;
+	if (!mutex) return EINVAL;
+
 	return 0;
 }
 
 /* Condition variables */
 static inline int pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr) {
 	(void)attr;
+
 	if (!cond) return EINVAL;
+
 	atomic_store(&cond->futex, 0);
 	atomic_store(&cond->waiters, 0);
+
 	return 0;
 }
 
@@ -564,19 +717,22 @@ static inline int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex
 	if (!cond || !mutex) return EINVAL;
 
 	atomic_fetch_add(&cond->waiters, 1);
+
 	int old_futex = atomic_load(&cond->futex);
 
 	pthread_mutex_unlock(mutex);
 
-	if (pthread_futex_wait(&cond->futex, old_futex) != 0) {
+	if (__jacl_pthread_futex_wait(&cond->futex, old_futex) != 0) {
 		while (atomic_load(&cond->futex) == old_futex) {
 			struct timespec ts = {0, 1000000}; /* 1ms */
+
 			nanosleep(&ts, NULL);
 		}
 	}
 
 	pthread_mutex_lock(mutex);
 	atomic_fetch_sub(&cond->waiters, 1);
+
 	return 0;
 }
 
@@ -584,51 +740,68 @@ static inline int pthread_cond_signal(pthread_cond_t *cond) {
 	if (!cond) return EINVAL;
 	if (atomic_load(&cond->waiters) > 0) {
 		atomic_fetch_add(&cond->futex, 1);
-		pthread_futex_wake(&cond->futex, 1);
+		__jacl_pthread_futex_wake(&cond->futex, 1);
 	}
+
 	return 0;
 }
 
 static inline int pthread_cond_broadcast(pthread_cond_t *cond) {
 	if (!cond) return EINVAL;
+
 	int waiters = atomic_load(&cond->waiters);
+
 	if (waiters > 0) {
 		atomic_fetch_add(&cond->futex, 1);
-		pthread_futex_wake(&cond->futex, waiters);
+		__jacl_pthread_futex_wake(&cond->futex, waiters);
 	}
+
 	return 0;
 }
 
 static inline int pthread_cond_destroy(pthread_cond_t *cond) {
-	(void)cond;
+	if (!cond) return EINVAL;
+
 	return 0;
 }
 
 /* Thread-local storage */
-#define MAX_TLS_KEYS 64
-static _Atomic unsigned int tls_key_counter = ATOMIC_VAR_INIT(0);
-static thread_local void *tls_values[MAX_TLS_KEYS];
-
 static inline int pthread_key_create(pthread_key_t *key, void (*destructor)(void*)) {
-	(void)destructor;
 	if (!key) return EINVAL;
-	*key = atomic_fetch_add(&tls_key_counter, 1);
-	return (*key < MAX_TLS_KEYS) ? 0 : EAGAIN;
+
+	__jacl_pthread_init();
+
+	unsigned int k = atomic_fetch_add(&__jacl_pthread_tls_key_counter, 1);
+
+	if (k >= MAX_TLS_KEYS) return EAGAIN;
+
+	*key = k;
+
+	__jacl_pthread_key_destructors[k] = destructor;
+
+	return 0;
 }
 
 static inline int pthread_key_delete(pthread_key_t key) {
-	(void)key;
+	if (key >= MAX_TLS_KEYS) return EINVAL;
+
+	__jacl_pthread_key_destructors[key] = NULL;
+
 	return 0;
 }
 
 static inline int pthread_setspecific(pthread_key_t key, const void *value) {
 	if (key >= MAX_TLS_KEYS) return EINVAL;
-	tls_values[key] = (void*)value;
+
+	__jacl_pthread_tls_values[key] = (void *)value;
+
 	return 0;
 }
 
 static inline void *pthread_getspecific(pthread_key_t key) {
-	return (key < MAX_TLS_KEYS) ? tls_values[key] : NULL;
+	if (key >= MAX_TLS_KEYS) return NULL;
+
+	return __jacl_pthread_tls_values[key];
 }
 
 /* ================================================================ */
@@ -691,7 +864,8 @@ static inline int pthread_mutex_unlock(pthread_mutex_t *mutex) {
 }
 
 static inline int pthread_mutex_destroy(pthread_mutex_t *mutex) {
-	(void)mutex;
+	if (!mutex) return EINVAL;
+
 	return 0;
 }
 
@@ -717,7 +891,8 @@ static inline int pthread_cond_broadcast(pthread_cond_t *cond) {
 }
 
 static inline int pthread_cond_destroy(pthread_cond_t *cond) {
-	(void)cond;
+	if (!cond) return EINVAL;
+
 	return 0;
 }
 
@@ -728,7 +903,8 @@ static inline int pthread_key_create(pthread_key_t *key, void (*destructor)(void
 }
 
 static inline int pthread_key_delete(pthread_key_t key) {
-	(void)key;
+	if (key >= MAX_TLS_KEYS) return EINVAL;
+
 	return 0;
 }
 
@@ -767,7 +943,8 @@ static inline int pthread_attr_init(pthread_attr_t *attr) {
 }
 
 static inline int pthread_attr_destroy(pthread_attr_t *attr) {
-	(void)attr;
+	if (!attr) return EINVAL;
+
 	return 0;
 }
 
@@ -790,7 +967,8 @@ static inline int pthread_mutexattr_init(pthread_mutexattr_t *attr) {
 }
 
 static inline int pthread_mutexattr_destroy(pthread_mutexattr_t *attr) {
-	(void)attr;
+	if (!attr) return EINVAL;
+
 	return 0;
 }
 
@@ -807,7 +985,8 @@ static inline int pthread_condattr_init(pthread_condattr_t *attr) {
 }
 
 static inline int pthread_condattr_destroy(pthread_condattr_t *attr) {
-	(void)attr;
+	if (!attr) return EINVAL;
+
 	return 0;
 }
 

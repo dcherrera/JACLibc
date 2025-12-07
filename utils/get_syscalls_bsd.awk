@@ -1,5 +1,3 @@
-# get_syscalls_freebsd_netbsd.awk
-#
 # Converts FreeBSD/NetBSD multi-line syscalls.master to X(SYS_name, num, "desc")
 
 # Skip comments and blank lines
@@ -59,6 +57,6 @@ function process_block(num, blk,    m, sig, name) {
 	# Strip sys_ prefix if present
 	sub(/^sys_/, "", name)
 
-	printf "X(SYS_%s, %d, \"%s\")\n", name, num, name
+	printf "X(SYS_%s, %d, %s)\n", name, num, name
 }
 

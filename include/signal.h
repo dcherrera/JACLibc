@@ -6,6 +6,7 @@
 #include <config.h>
 #include <errno.h>
 #include <stddef.h>
+#include <time.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
 
@@ -34,61 +35,63 @@ typedef void (*sig_t)(int);		/* Generic fallback */
 #define SIG_IGN  ((__sighandler_t) 1)
 #define SIG_ERR  ((__sighandler_t) -1)
 
-/* — ISO C Standard Signals (C99 §7.14.3) — */
-#define SIGABRT  6
-#define SIGFPE   8
-#define SIGILL   4
-#define SIGINT   2
-#define SIGSEGV  11
-#define SIGTERM  15
+#include JACL_X_SIGNALS
+#define X_ENUM(name, val) name = (val),
+enum { SIGNAL_NUMBERS(X_ENUM) };
+enum { SIGNAL_ACTION_FLAGS(X_ENUM) };
+enum { SIGNAL_MASK_OPS(X_ENUM) };
+enum { SIGNAL_INFO_CODES(X_ENUM) };
+enum { SIGNAL_ILL_CODES(X_ENUM) };
+enum { SIGNAL_FPE_CODES(X_ENUM) };
+enum { SIGNAL_SEGV_CODES(X_ENUM) };
+enum { SIGNAL_BUS_CODES(X_ENUM) };
+enum { SIGNAL_TRAP_CODES(X_ENUM) };
+enum { SIGNAL_CLD_CODES(X_ENUM) };
+enum { SIGNAL_POLL_CODES(X_ENUM) };
+enum { SIGNAL_EVENT_TYPES(X_ENUM) };
+#undef X_ENUM
+
+#if JACL_OS_LINUX
+	/* Modern arches that DON'T need it */
+	#if !(JACL_ARCH_RISCV32 || JACL_ARCH_RISCV64 || JACL_ARCH_LOONGARCH64)
+		#define JACL_RESTORER 0x04000000
+	#endif
+#endif
 
 /* — POSIX Extensions (when feature test macros are defined) — */
 #if JACL_HAS_POSIX
 
+/* Portable syscall name mapping */
+#if JACL_OS_LINUX
+	#define JACL_SYS_SIGACTION    SYS_rt_sigaction
+	#define JACL_SYS_SIGPROCMASK  SYS_rt_sigprocmask
+	#define JACL_SYS_SIGPENDING   SYS_rt_sigpending
+	#define JACL_SYS_SIGSUSPEND   SYS_rt_sigsuspend
+	#define JACL_SYS_SIGTIMEDWAIT SYS_rt_sigtimedwait
+	#define JACL_SYS_SIGQUEUEINFO SYS_rt_sigqueueinfo
+#else
+    /* BSD/Darwin: use classic syscalls */
+    #define JACL_SYS_SIGACTION    SYS_sigaction
+    #define JACL_SYS_SIGPROCMASK  SYS_sigprocmask
+    #define JACL_SYS_SIGPENDING   SYS_sigpending
+    #define JACL_SYS_SIGSUSPEND   SYS_sigsuspend
+
+    /* Advanced functions - only on some BSDs */
+    #if JACL_OS_FREEBSD || JACL_OS_DRAGONFLY
+        #define JACL_SYS_SIGTIMEDWAIT SYS_sigtimedwait
+        #define JACL_SYS_SIGWAITINFO  SYS_sigwaitinfo
+    #endif
+
+    #if JACL_OS_FREEBSD
+        #define JACL_SYS_SIGQUEUE SYS_sigqueue
+    #elif JACL_OS_NETBSD
+        #define JACL_SYS_SIGQUEUE SYS_sigqueueinfo
+    #endif
+#endif
+
 typedef struct { unsigned long __bits[2]; } sigset_t;
 
-/* Additional POSIX signals (Linux-ish layout) */
-#define SIGHUP   1
-#define SIGQUIT  3
-#define SIGTRAP  5
-#define SIGBUS   7
-#define SIGKILL  9
-#define SIGUSR1  10
-#define SIGUSR2  12
-#define SIGPIPE  13
-#define SIGALRM  14
-#define SIGCHLD  17
-#define SIGCONT  18
-#define SIGSTOP  19
-#define SIGTSTP  20
-#define SIGTTIN  21
-#define SIGTTOU  22
-#define SIGURG   23
-#define SIGXCPU  24
-#define SIGXFSZ  25
-
-#define SIGRTMIN 34
-#define SIGRTMAX 64
-
-/* Signal mask operations */
-#define SIG_BLOCK    0
-#define SIG_UNBLOCK  1
-#define SIG_SETMASK  2
-
-/* Signal action flags */
-#define SA_NOCLDSTOP 0x00000001
-#define SA_NOCLDWAIT 0x00000002
-#define SA_SIGINFO   0x00000004
-#define SA_RESTART   0x10000000
-#define SA_NODEFER   0x40000000
-#define SA_RESETHAND 0x80000000
-
-/* Signal information codes */
-#define SI_USER    0
-#define SI_QUEUE  -1
-#define SI_TIMER  -2
-#define SI_ASYNCIO -4
-#define SI_MESGQ  -3
+#define JACL_SIGSET_MAX 128  /* 2 * 64-bit words */
 
 /* — Signal Value Union — */
 union sigval {
@@ -114,13 +117,40 @@ typedef struct {
 } siginfo_t;
 
 /* — Signal Action Structure — */
-struct sigaction {
-	void      (*sa_handler)(int);
-	void      (*sa_sigaction)(int, siginfo_t *, void *);
-	sigset_t   sa_mask;
-	int        sa_flags;
-	void      (*sa_restorer)(void);
-};
+#if JACL_OS_LINUX
+	#if JACL_ARCH_X64 || JACL_ARCH_ARM64
+		/* Linux x64/arm64: sa_flags before sa_mask, no sa_sigaction union */
+		struct sigaction {
+			void      (*sa_handler)(int);
+			unsigned long sa_flags;
+			void      (*sa_restorer)(void);
+			sigset_t   sa_mask;  /* LAST for kernel extensibility */
+		};
+	#else
+		/* Linux other arches: union + different order */
+		struct sigaction {
+			union {
+				void (*_sa_handler)(int);
+				void (*_sa_sigaction)(int, siginfo_t *, void *);
+			} _u;
+			sigset_t   sa_mask;
+			unsigned long sa_flags;
+			void      (*sa_restorer)(void);
+		};
+		#define sa_handler _u._sa_handler
+		#define sa_sigaction _u._sa_sigaction
+	#endif
+#else
+	/* POSIX/BSD layout */
+	struct sigaction {
+		void      (*sa_handler)(int);
+		void      (*sa_sigaction)(int, siginfo_t *, void *);
+		sigset_t   sa_mask;
+		int        sa_flags;
+		void      (*sa_restorer)(void);
+	};
+#endif
+
 
 /* — Signal Event Structure — */
 struct sigevent {
@@ -130,11 +160,6 @@ struct sigevent {
 	void       (*sigev_notify_function)(union sigval);
 	void        *sigev_notify_attributes;
 };
-
-/* Event notification types */
-#define SIGEV_NONE   0
-#define SIGEV_SIGNAL 1
-#define SIGEV_THREAD 2
 
 static inline int kill(pid_t pid, int sig) {
 	return (int)syscall(SYS_kill, (long)pid, (long)sig);
@@ -159,7 +184,7 @@ static inline int sigfillset(sigset_t *set) {
 }
 
 static inline int sigaddset(sigset_t *set, int signo) {
-	if (!set || signo < 1 || signo > SIGRTMAX) { errno = EINVAL; return -1; }
+	if (!set || signo < 1 || signo > JACL_SIGSET_MAX) { errno = EINVAL; return -1; }
 
 	unsigned idx  = (unsigned)(signo - 1) / (8U * sizeof(unsigned long));
 	unsigned bit  = (unsigned)(signo - 1) % (8U * sizeof(unsigned long));
@@ -168,9 +193,8 @@ static inline int sigaddset(sigset_t *set, int signo) {
 
 	return 0;
 }
-
 static inline int sigdelset(sigset_t *set, int signo) {
-	if (!set || signo < 1 || signo > SIGRTMAX) { errno = EINVAL; return -1; }
+	if (!set || signo < 1 || signo > JACL_SIGSET_MAX) { errno = EINVAL; return -1; }
 
 	unsigned idx  = (unsigned)(signo - 1) / (8U * sizeof(unsigned long));
 	unsigned bit  = (unsigned)(signo - 1) % (8U * sizeof(unsigned long));
@@ -181,7 +205,7 @@ static inline int sigdelset(sigset_t *set, int signo) {
 }
 
 static inline int sigismember(const sigset_t *set, int signo) {
-	if (!set || signo < 1 || signo > SIGRTMAX) { errno = EINVAL; return -1; }
+	if (!set || signo < 1 || signo > JACL_SIGSET_MAX) { errno = EINVAL; return -1; }
 
 	unsigned idx  = (unsigned)(signo - 1) / (8U * sizeof(unsigned long));
 	unsigned bit  = (unsigned)(signo - 1) % (8U * sizeof(unsigned long));
@@ -189,49 +213,87 @@ static inline int sigismember(const sigset_t *set, int signo) {
 	return (set->__bits[idx] & (1UL << bit)) != 0;
 }
 
-
 static inline int sigaction(int sig, const struct sigaction *restrict act, struct sigaction *restrict oact) {
-	/* rt_sigaction uses a sigset size argument; Linux expects sizeof(sigset_t) */
-	return  syscall(SYS_rt_sigaction, (long)sig, (long)act, (long)oact, (long)sizeof(sigset_t));
+	#if JACL_OS_LINUX
+		/* Linux kernel expects _NSIG/8 = 64/8 = 8 bytes, not sizeof(sigset_t) */
+		return syscall(JACL_SYS_SIGACTION, (long)sig, (long)act, (long)oact, 8L);
+	#else
+		return syscall(JACL_SYS_SIGACTION, (long)sig, (long)act, (long)oact);
+	#endif
 }
+
+
 static inline int sigprocmask(int how, const sigset_t *restrict set, sigset_t *restrict oset) {
-	return  syscall(SYS_rt_sigprocmask, (long)how, (long)set, (long)oset, (long)sizeof(sigset_t));
+	#if JACL_OS_LINUX
+		return syscall(JACL_SYS_SIGPROCMASK, (long)how, (long)set, (long)oset, (long)sizeof(sigset_t));
+	#else
+		return syscall(JACL_SYS_SIGPROCMASK, (long)how, (long)set, (long)oset);
+	#endif
 }
+
 static inline int sigpending(sigset_t *set) {
-	/* rt_sigpending has a sigset size argument too */
-	return syscall(SYS_rt_sigpending, (long)set, (long)sizeof(sigset_t));
+	#if JACL_OS_LINUX
+		return syscall(JACL_SYS_SIGPENDING, (long)set, (long)sizeof(sigset_t));
+	#else
+		return syscall(JACL_SYS_SIGPENDING, (long)set);
+	#endif
 }
 
 static inline int sigsuspend(const sigset_t *mask) {
-	long r = syscall(SYS_rt_sigsuspend, (long)mask, (long)sizeof(sigset_t));
-
-	return (int)r;
+	#if JACL_OS_LINUX
+		return (int)syscall(JACL_SYS_SIGSUSPEND, (long)mask, (long)sizeof(sigset_t));
+	#else
+		return (int)syscall(JACL_SYS_SIGSUSPEND, (long)mask);
+	#endif
 }
 
-
 static inline int sigwaitinfo(const sigset_t *restrict set, siginfo_t *restrict info) {
-	/* rt_sigtimedwait with NULL timeout behaves like sigwaitinfo */
-	return syscall(SYS_rt_sigtimedwait, (long)set, (long)info, (long)NULL, (long)sizeof(sigset_t));
+	#ifdef JACL_SYS_SIGWAITINFO
+		return syscall(JACL_SYS_SIGWAITINFO, (long)set, (long)info);
+	#elif defined(JACL_SYS_SIGTIMEDWAIT)
+		#if JACL_OS_LINUX
+			return syscall(JACL_SYS_SIGTIMEDWAIT, (long)set, (long)info, (long)NULL, (long)sizeof(sigset_t));
+		#else
+			return syscall(JACL_SYS_SIGTIMEDWAIT, (long)set, (long)info, (long)NULL);
+		#endif
+	#else
+		errno = ENOSYS;
+
+		return -1;
+#endif
 }
 
 static inline int sigtimedwait(const sigset_t *restrict set, siginfo_t *restrict info, const struct timespec *restrict timeout) {
-	return syscall(SYS_rt_sigtimedwait, (long)set, (long)info, (long)timeout, (long)sizeof(sigset_t));
+	#ifdef JACL_SYS_SIGTIMEDWAIT
+		#if JACL_OS_LINUX
+			return syscall(JACL_SYS_SIGTIMEDWAIT, (long)set, (long)info, (long)timeout, (long)sizeof(sigset_t));
+		#else
+			return syscall(JACL_SYS_SIGTIMEDWAIT, (long)set, (long)info, (long)timeout);
+		#endif
+	#else
+		errno = ENOSYS;
+
+		return -1;
+	#endif
 }
 
 static inline int sigqueue(pid_t pid, int sig, const union sigval value) {
-	siginfo_t info;
+	#ifdef JACL_SYS_SIGQUEUE
+		siginfo_t info;
 
-	/* Zero it so we don't leak junk into the kernel ABI */
-	for (size_t i = 0; i < sizeof(info); ++i) ((unsigned char *)&info)[i] = 0;
+		for (size_t i = 0; i < sizeof(info); ++i) ((unsigned char *)&info)[i] = 0;
 
-	info.si_signo      = sig;
-	info.si_code       = SI_QUEUE;
-	info.si_pid        = pid;
-	info.si_value      = value;
+		info.si_signo = sig;
+		info.si_code = SI_QUEUE;
+		info.si_pid = pid;
+		info.si_value = value;
 
-	long r = syscall(SYS_rt_sigqueueinfo, (long)pid, (long)sig, (long)&info);
+		return (int)syscall(JACL_SYS_SIGQUEUE, (long)pid, (long)sig, (long)&info);
+	#else
+		errno = ENOSYS;
 
-	return (int)r;
+		return -1;
+	#endif
 }
 
 static inline int sigwait(const sigset_t *restrict set, int *restrict sig) {
@@ -264,9 +326,14 @@ typedef unsigned long sigset_t;
 
 /* — Core ISO C Functions (C99+) — */
 
-
 /* Minimal signal() built on sigaction when POSIX is present. */
 #if JACL_HAS_POSIX
+
+#if JACL_RESTORER
+/* Linux requires signal return trampoline - defined in arch files */
+extern void __restore_rt(void);
+#endif
+
 static inline sig_t signal(int sig, sig_t func) {
 	struct sigaction act, oact;
 
@@ -274,13 +341,20 @@ static inline sig_t signal(int sig, sig_t func) {
 
 	sigemptyset(&act.sa_mask);
 
-	act.sa_flags = 0;
+	act.sa_flags = SA_RESTART;
+
+	#if JACL_RESTORER
+		act.sa_flags |= JACL_RESTORER;
+		act.sa_restorer = &__restore_rt;
+	#endif
 
 	if (sigaction(sig, &act, &oact) < 0) return SIG_ERR;
 
 	return oact.sa_handler;
 }
+
 #else
+
 /* Fallback stub: no real signal handling available. */
 static inline sig_t signal(int sig, sig_t func) {
 	(void)sig;

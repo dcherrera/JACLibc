@@ -48,6 +48,17 @@
 		"brlid r15, _start_main\n"
 		"nop\n"
 	);
+
+	#if JACL_OS_LINUX
+		__asm__(
+			".text\n"
+			".globl __restore_rt\n"
+			".type __restore_rt,@function\n"
+			"__restore_rt:\n"
+			"addik r12, r0, 173\n"
+			"brki r14, 8\n"
+		);
+	#endif
 #undef __ARCH_START
 #endif
 
@@ -69,4 +80,3 @@
 #ifdef __cplusplus
 	}
 #endif
-

@@ -32,36 +32,49 @@ dragonfly_url="https://gitweb.dragonflybsd.org/dragonfly.git/blob_plain/${dragon
 # get X Files
 xfiles() {
   os="$1"
-  url="$(eval echo "\$${os}_url")$3"
   arch="$2"
+  shift 2
+
   file="${os}_${arch}.h"
   gen="${ROOT}/include/x/${file}"
+  tmp="${gen}.tmp"
   title=$(echo "$os" | tr '[:lower:]' '[:upper:]')
+  base_url="$(eval echo "\$${os}_url")"
 
   printf "%-40s %s\n" "Parsing $os $arch syscalls..." "$file"
 
-  if ! curl -fsSL "$url" > "${gen}.tmp" 2>/dev/null; then
-    echo "ERROR: Failed to fetch $url" >&2
-    rm -f "${gen}.tmp"
-    exit 1
-  fi
+  # Clear temp file
+  : > "$tmp"
 
+  # Fetch and concatenate all source files
+  for rel in "$@"; do
+    url="${base_url}${rel}"
+    if ! curl -fsSL "$url" >> "$tmp" 2>/dev/null; then
+      echo "ERROR: Failed to fetch $url" >&2
+      rm -f "$tmp"
+      exit 1
+    fi
+  done
+
+  # Generate header with all source URLs listed
   {
     echo "/**"
     echo " * $title SYSCALLS IMPORTED  //  last updated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
-    echo " * $url"
+    for rel in "$@"; do
+      echo " * ${base_url}${rel}"
+    done
     echo " */"
     echo ""
-    awk -varch="$arch" -f "$ROOT/utils/get_syscalls_${os}.awk" "${gen}.tmp"
+    awk -varch="$arch" -f "$ROOT/utils/get_syscalls_${os}.awk" "$tmp"
   } > "$gen"
 
   if [ ! -s "$gen" ]; then
-    echo "ERROR: awk failed $file from $url" >&2
-    rm -f "${gen}.tmp"
+    echo "ERROR: awk failed $file from $base_url" >&2
+    #rm -f "$tmp"
     exit 1
   fi
 
-  rm "${gen}.tmp"
+  rm "$tmp"
   sleep 1 && true
 }
 
@@ -74,7 +87,7 @@ xstubs() {
   {
     printf "%-40s %s\n" "Linking $os $arch syscalls..." "$file"
     cd "$ROOT/include/x"
-    ln -s ${os}_generic.h $file
+    ln -sf ${os}_generic.h $file
   }
 }
 
@@ -171,6 +184,11 @@ xstubs  openbsd    x86
 xfiles  dragonfly  generic   "/sys/kern/syscalls.master"
 xstubs  dragonfly  x64
 xstubs  dragonfly  x86
+
+# Windows
+xstubs  windows    x64
+xstubs  windows    x86
+xstubs  windows    arm64
 
 # Config
 grep -R "if JACL_HASSYS" "$ROOT" \

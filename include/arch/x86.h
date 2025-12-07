@@ -40,6 +40,17 @@
 		"push %eax\n"
 		"call _start_main\n"
 	);
+
+	#if JACL_OS_LINUX
+		__asm__(
+			".text\n"
+			".globl __restore_rt\n"
+			".type __restore_rt,@function\n"
+			"__restore_rt:\n"
+			"mov $173, %eax\n"
+			"int $0x80\n"
+		);
+	#endif
 #undef __ARCH_START
 #endif
 

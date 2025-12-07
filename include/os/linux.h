@@ -8,6 +8,12 @@
 	#define JACL_FMT elf
 	#define JACL_FMT_ELF 1
 	#define __jacl_os_syscall __linux_syscall
+	#if defined(JACL_ARCH_X64) || defined(JACL_ARCH_X86)
+		#undef __jacl_arch_tls_set
+		#undef __jacl_arch_tls_get
+		#define __jacl_arch_tls_set __os_set_fs_register
+		#define __jacl_arch_tls_get __os_get_fs_register
+	#endif
 #undef __OS_CONFIG
 #endif
 
@@ -27,10 +33,10 @@
 		#define ARCH_SET_FS 0x1002
 		#define ARCH_GET_FS 0x1003
 
-		static inline void __x64_set_fs_register(void* addr) {
+		static inline void __os_set_fs_register(void* addr) {
 			__linux_syscall(SYS_arch_prctl, ARCH_SET_FS, (long)addr, 0, 0, 0, 0);
 		}
-		static inline void* __x64_get_fs_register(void) {
+		static inline void* __os_get_fs_register(void) {
 			return __linux_syscall(SYS_arch_prctl, ARCH_GET_FS, 0, 0, 0, 0, 0);
 		}
 	#else

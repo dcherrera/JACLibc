@@ -48,6 +48,17 @@
 		"move.l %d0, -(%sp)\n"
 		"jsr _start_main\n"
 	);
+
+	#if JACL_OS_LINUX
+		__asm__(
+			".text\n"
+			".globl __restore_rt\n"
+			".type __restore_rt,@function\n"
+			"__restore_rt:\n"
+			"move.l #173, %d0\n"
+			"trap #0\n"
+		);
+	#endif
 #undef __ARCH_START
 #endif
 

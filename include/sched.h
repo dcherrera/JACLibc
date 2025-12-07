@@ -124,6 +124,27 @@ static inline int sched_getaffinity(pid_t pid, size_t cpusetsize, void *mask) {
   #include <sys/syscall.h>
 #endif
 
+/* Linux-specific scheduling policies and clone flags */
+#if JACL_OS_LINUX
+	#define SCHED_BATCH    3
+	#define SCHED_IDLE     5
+	#define SCHED_DEADLINE 6
+
+	/* Clone flags for clone() syscall */
+	#define CLONE_VM              0x00000100
+	#define CLONE_FS              0x00000200
+	#define CLONE_FILES           0x00000400
+	#define CLONE_SIGHAND         0x00000800
+	#define CLONE_THREAD          0x00010000
+	#define CLONE_NEWNS           0x00020000
+	#define CLONE_SYSVSEM         0x00040000
+	#define CLONE_SETTLS          0x00080000
+	#define CLONE_PARENT_SETTID   0x00100000
+	#define CLONE_CHILD_CLEARTID  0x00200000
+	#define CLONE_DETACHED        0x00400000
+	#define CLONE_CHILD_SETTID    0x01000000
+#endif
+
 /* Thread yielding */
 static inline int sched_yield(void) {
 	#if JACL_HAS_POSIX
@@ -297,11 +318,28 @@ static inline int sched_rr_get_interval(pid_t pid, struct timespec *tp) {
 
 /* CPU affinity functions (Linux extension) */
 static inline int sched_setaffinity(pid_t pid, size_t cpusetsize, const void *mask) {
-  return syscall(SYS_sched_setaffinity, pid, cpusetsize, mask);
+	int ret = syscall(SYS_sched_setaffinity, pid, cpusetsize, mask);
+
+	if (ret < 0) {
+		errno = -ret;
+
+		return -1;
+	}
+
+	return ret;
 }
 
+
 static inline int sched_getaffinity(pid_t pid, size_t cpusetsize, void *mask) {
-  return syscall(SYS_sched_getaffinity, pid, cpusetsize, mask);
+	int ret = syscall(SYS_sched_getaffinity, pid, cpusetsize, mask);
+
+	if (ret < 0) {
+		errno = -ret;
+
+		return -1;
+	}
+
+	return ret;
 }
 #else
 /* CPU affinity not supported on non-Linux systems */

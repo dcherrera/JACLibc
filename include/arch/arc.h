@@ -38,7 +38,6 @@
 #undef __ARCH_SYSCALL
 #endif
 
-
 #ifdef __ARCH_START
 	__asm__(
 		".global _start\n"
@@ -48,6 +47,17 @@
 		"and sp, sp, -16\n"
 		"jl _start_main\n"
 	);
+
+	#if JACL_OS_LINUX
+		__asm__(
+			".text\n"
+			".globl __restore_rt\n"
+			".type __restore_rt,@function\n"
+			"__restore_rt:\n"
+			"mov r8, 139\n"
+			"trap0\n"
+		);
+	#endif
 #undef __ARCH_START
 #endif
 
@@ -69,4 +79,3 @@
 #ifdef __cplusplus
 	}
 #endif
-

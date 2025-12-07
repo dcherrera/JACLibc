@@ -20,9 +20,11 @@
 #define JACL_CONCAT_HAS(a, b) __##a##_has_##b
 #define JACL_CONCAT_HAS_EXPAND(a, b) JACL_CONCAT_HAS(a, b)
 #define JACL_HEADER(dir, file) <dir/file.h>
-#define JACL_X_FILES JACL_HEADER(x, JACL_CONCAT_EXPAND(JACL_OS,JACL_ARCH,_))
 #define JACL_OS_ARCH JACL_CONCAT_EXPAND(JACL_OS, JACL_ARCH, _)
 #define JACL_HASSYS(name) JACL_CONCAT_HAS_EXPAND(JACL_OS_ARCH, name)
+
+#define JACL_X_SYSCALL JACL_HEADER(x, JACL_OS_ARCH)
+#define JACL_X_SIGNALS JACL_HEADER(x, JACL_CONCAT_EXPAND(signals,JACL_OS,_))
 
 /* ============================================================= */
 /* C Standards Detection                                         */
@@ -132,6 +134,19 @@
   	#define thread_local _Thread_local
 	#endif /* !__cplusplus */
 #endif /* !JACL_HAS_C23 */
+
+#ifndef _Complex_I
+	#define _Complex_I (0.0f+1.0fi)
+#endif
+
+#ifndef I
+	#define I _Complex_I
+#endif
+
+#ifndef complex
+	#define complex _Complex
+#endif
+
 
 /* ============================================================= */
 /* Architecture and Operating System Detection                   */
@@ -330,7 +345,7 @@ static inline void* __jacl_frame_address(int level) {
 #endif /*atomic builtins */
 
 // Thread support detection
-#if defined(_POSIX_THREADS) || defined(__pthreads__)
+#if JACL_HAS_POSIX
   #define JACL_HAS_PTHREADS 1
 #else /* no pthreads */
   #define JACL_HAS_PTHREADS 0
