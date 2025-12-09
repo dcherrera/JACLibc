@@ -11,6 +11,7 @@
 	#define __jacl_arch_syscall __hppa_syscall
 	#define __jacl_arch_tls_set __hppa_set_tp_register
 	#define __jacl_arch_tls_get __hppa_get_tp_register
+	#define __jacl_arch_clone_thread __hppa_clone_thread
 	#define JACL_BITS 32
 #undef __ARCH_CONFIG
 #endif
@@ -78,7 +79,42 @@
 #undef __ARCH_TLS
 #endif
 
+#ifdef __ARCH_CLONE && JACL_OS_LINUX
+	static inline pid_t __hppa_clone_thread(void *stack, size_t stack_size, int (*fn)(void *), void *arg) {
+		char *stack_top = (char *)stack + stack_size;
+		stack_top = (char *)((uintptr_t)stack_top & ~63UL) - 64;
+
+		int flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
+		long ret;
+
+		__asm__ volatile(
+			"copy %2, %%r26\n\t"
+			"copy %3, %%r25\n\t"
+			"ldi 0, %%r24\n\t"
+			"ldi 0, %%r23\n\t"
+			"ldi 0, %%r22\n\t"
+			"ldi 120, %%r20\n\t"
+			"ble 0x100(%%sr2, %%r0)\n\t"
+			"ldi -1, %%r1\n\t"
+			"cmpib,= 0, %%r28, 1f\n\t"
+
+			"ldi 0, %%r3\n\t"
+			"copy %5, %%r26\n\t"
+			"ble 0(%%sr0, %4)\n\t"
+			"ldi 1, %%r20\n\t"
+			"ble 0x100(%%sr2, %%r0)\n\t"
+
+			"1:\n\t"
+			: "=r"(ret)
+			: "r"((long)120), "r"((long)flags), "r"(stack_top), "r"(fn), "r"(arg)
+			: "r1", "r20", "r22", "r23", "r24", "r25", "r26", "r28", "memory"
+		);
+
+		return ret;
+	}
+#undef __ARCH_CLONE
+#endif
+
 #ifdef __cplusplus
 	}
 #endif
-

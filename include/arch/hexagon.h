@@ -11,6 +11,7 @@
 	#define __jacl_arch_syscall __hexagon_syscall
 	#define __jacl_arch_tls_set __hexagon_set_tp_register
 	#define __jacl_arch_tls_get __hexagon_get_tp_register
+	#define __jacl_arch_clone_thread __hexagon_clone_thread
 	#define JACL_BITS 32
 #undef __ARCH_CONFIG
 #endif
@@ -74,6 +75,42 @@
 		return result;
 	}
 #undef __ARCH_TLS
+#endif
+
+#ifdef __ARCH_CLONE && JACL_OS_LINUX
+	static inline pid_t __hexagon_clone_thread(void *stack, size_t stack_size, int (*fn)(void *), void *arg) {
+		char *stack_top = (char *)stack + stack_size;
+		stack_top = (char *)((uintptr_t)stack_top & ~7UL) - 8;
+
+		int flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
+		long ret;
+
+		__asm__ volatile(
+			"r0 = %2\n\t"
+			"r1 = %3\n\t"
+			"r2 = #0\n\t"
+			"r3 = #0\n\t"
+			"r4 = #0\n\t"
+			"r6 = #220\n\t"
+			"trap0(#1)\n\t"
+			"p0 = cmp.eq(r0, #0)\n\t"
+			"if (!p0) jump 1f\n\t"
+
+			"r29 = #0\n\t"
+			"r0 = %5\n\t"
+			"callr %4\n\t"
+			"r6 = #93\n\t"
+			"trap0(#1)\n\t"
+
+			"1:\n\t"
+			: "=r"(ret)
+			: "r"((long)220), "r"((long)flags), "r"(stack_top), "r"(fn), "r"(arg)
+			: "r0", "r1", "r2", "r3", "r4", "r6", "r29", "memory"
+		);
+
+		return ret;
+	}
+#undef __ARCH_CLONE
 #endif
 
 #ifdef __cplusplus

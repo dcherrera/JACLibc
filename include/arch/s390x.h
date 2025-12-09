@@ -11,6 +11,7 @@
 	#define __jacl_arch_syscall __s390x_syscall
 	#define __jacl_arch_tls_set __s390x_set_tp_register
 	#define __jacl_arch_tls_get __s390x_get_tp_register
+	#define __jacl_arch_clone_thread __s390x_clone_thread
 	#define JACL_BITS 64
 #undef __ARCH_CONFIG
 #endif
@@ -75,6 +76,40 @@
 		return result;
 	}
 #undef __ARCH_TLS
+#endif
+
+#ifdef __ARCH_CLONE && JACL_OS_LINUX
+	static inline pid_t __s390x_clone_thread(void *stack, size_t stack_size, int (*fn)(void *), void *arg) {
+		char *stack_top = (char *)stack + stack_size;
+		stack_top = (char *)((uintptr_t)stack_top & ~7UL) - 160;  // s390x ABI
+
+		int flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
+		long ret;
+
+		__asm__ volatile(
+			"lgr %%r2, %2\n\t"
+			"lgr %%r3, %3\n\t"
+			"lghi %%r4, 0\n\t"
+			"lghi %%r5, 0\n\t"
+			"lghi %%r6, 0\n\t"
+			"svc 120\n\t"
+			"ltgr %%r2, %%r2\n\t"
+			"jne 1f\n\t"
+
+			"lghi %%r11, 0\n\t"
+			"lgr %%r2, %5\n\t"
+			"basr %%r14, %4\n\t"
+			"svc 1\n\t"
+
+			"1:\n\t"
+			: "=r"(ret)
+			: "r"((long)120), "r"((long)flags), "r"(stack_top), "r"(fn), "r"(arg)
+			: "r2", "r3", "r4", "r5", "r6", "r14", "memory"
+		);
+
+		return ret;
+	}
+#undef __ARCH_CLONE
 #endif
 
 #ifdef __cplusplus

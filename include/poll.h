@@ -24,6 +24,7 @@ extern "C" {
 #else
 	#define POLL_POSIX 1
 	#include <unistd.h>
+	#include <pthread.h>
 	#include <sys/stat.h>
 	#include <sys/syscall.h>
 #endif
@@ -53,23 +54,22 @@ struct pollfd {
 /* ================================================================ */
 
 #define POLLIN      0x0001  /* Data other than high-priority data may be read */
-#define POLLRDNORM  0x0002  /* Normal data may be read without blocking */
-#define POLLRDBAND  0x0004  /* Priority data may be read without blocking */
-#define POLLPRI     0x0008  /* High priority data may be read without blocking */
+#define POLLPRI     0x0002  /* High priority data may be read without blocking */
+#define POLLOUT     0x0004  /* Normal data may be written without blocking */
+#define POLLERR     0x0008  /* An error has occurred */
 
-#define POLLOUT     0x0010  /* Normal data may be written without blocking */
-#define POLLWRNORM  0x0020  /* Equivalent to POLLOUT */
-#define POLLWRBAND  0x0040  /* Priority data may be written */
+#define POLLHUP     0x0010  /* Device has been disconnected */
+#define POLLNVAL    0x0020  /* Invalid fd member */
+#define POLLRDNORM  0x0040  /* Normal data may be read without blocking */
+#define POLLRDBAND  0x0080  /* Priority data may be read without blocking */
 
-#define POLLERR     0x0100  /* An error has occurred */
-#define POLLHUP     0x0200  /* Device has been disconnected */
-#define POLLNVAL    0x0400  /* Invalid fd member */
+#define POLLWRNORM  0x0100  /* Equivalent to POLLOUT */
+#define POLLWRBAND  0x0200  /* Priority data may be written */
 
-#if JACL_OS_LINUX
-#define POLLRDHUP   0x2000  /* Stream socket peer closed connection */
-#define POLLMSG     0x0800  /* Unused on Linux */
-#define POLLREMOVE  0x1000  /* Remove from being monitored (unused) */
-#endif
+/* Platform extensions */
+#define POLLRDHUP   0x2000  /* Linux: stream socket peer closed */
+#define POLLMSG     0x0800  /* Linux: message available */
+#define POLLREMOVE  0x1000  /* Linux: remove from monitoring */
 
 #define INFTIM      (-1)    /* Infinite timeout */
 
@@ -78,6 +78,7 @@ struct pollfd {
 /* ================================================================ */
 
 #if POLL_WIN32
+
 typedef enum {
 	WIN_FD_INVALID,
 	WIN_FD_SOCKET,
@@ -163,6 +164,7 @@ static inline int win32_poll_file(HANDLE h, short events) {
 
 	return revents;
 }
+
 #endif
 
 /* ================================================================ */
@@ -170,6 +172,7 @@ static inline int win32_poll_file(HANDLE h, short events) {
 /* ================================================================ */
 
 #if POLL_WIN32
+
 /* ================================================================ */
 /* Enhanced Windows implementation                                  */
 /* ================================================================ */
@@ -338,6 +341,7 @@ static inline int ppoll(struct pollfd fds[], nfds_t nfds, const struct timespec 
 }
 
 #elif POLL_DUMMY
+
 /* ================================================================ */
 /* WebAssembly - Polling not supported                              */
 /* ================================================================ */
@@ -355,95 +359,50 @@ static inline int ppoll(struct pollfd fds[], nfds_t nfds, const struct timespec 
 }
 
 #else
+
 /* ================================================================ */
 /* Enhanced POSIX implementation                                    */
 /* ================================================================ */
 
 static inline int poll(struct pollfd fds[], nfds_t nfds, int timeout) {
-	if (!fds && nfds > 0) {
-		errno = EINVAL;
-		return -1;
-	}
+	if (nfds == 0) return 0;
+	if (!fds && nfds > 0) { errno = EINVAL; return -1; }
 
-	/* Handle regular files correctly - they should always be ready */
-	int ready_count = 0;
-	for (nfds_t i = 0; i < nfds; i++) {
-		fds[i].revents = 0;
-
-		if (fds[i].fd < 0) {
-			if (fds[i].fd == -1) {
-				/* -1 means ignore this entry */
-				continue;
-			} else {
-				fds[i].revents = POLLNVAL;
-				ready_count++;
-				continue;
-			}
-		}
-
-		/* Check if it's a regular file */
-		struct stat st;
-		if (fstat(fds[i].fd, &st) == 0) {
-			if (S_ISREG(st.st_mode)) {
-				/* Regular files are always ready for I/O */
-				if (fds[i].events & (POLLIN | POLLRDNORM)) {
-					fds[i].revents |= POLLIN;
-				}
-				if (fds[i].events & (POLLOUT | POLLWRNORM)) {
-					fds[i].revents |= POLLOUT;
-				}
-				if (fds[i].revents != 0) {
-					ready_count++;
-				}
-			}
-		}
-	}
-
-	/* If we have ready regular files and timeout is 0, return immediately */
-	if (ready_count > 0 && timeout == 0) {
-		return ready_count;
-	}
-
-	/* Use syscall for the actual polling */
-	#if defined(SYS_poll)
-		int result = (int)syscall(SYS_poll, fds, nfds, timeout);
-
-		if (result >= 0) return result + ready_count;
-
-		return result;
-	#else
-		errno = ENOSYS;
-
-		return -1;
-	#endif
+	/* All POSIX platforms have poll syscall */
+	return (int)syscall(SYS_poll, fds, nfds, timeout);
 }
 
 static inline int ppoll(struct pollfd fds[], nfds_t nfds, const struct timespec *timeout_ts, const sigset_t *sigmask) {
+	if (nfds == 0) return 0;
+
 	if (!fds && nfds > 0) {
 		errno = EINVAL;
 		return -1;
 	}
 
-	#if defined(SYS_ppoll)
-		return (int)syscall(SYS_ppoll, fds, nfds, timeout_ts, sigmask, sizeof(sigset_t));
+	#if JACL_OS_LINUX
+		/* Linux requires sigsetsize as 5th argument */
+		size_t sigsetsize = sigmask ? 8 : 0;
+		return (int)syscall(SYS_ppoll, fds, nfds, timeout_ts, sigmask, sigsetsize);
+	#elif JACL_OS_FREEBSD || JACL_OS_NETBSD || JACL_OS_DRAGONFLY
+		/* BSD systems have ppoll (4 args) */
+		return (int)syscall(SYS_ppoll, fds, nfds, timeout_ts, sigmask);
+	#else
+		/* Darwin and OPENBSD: use poll + pthread_sigmask fallback */
+		sigset_t old_sigmask;
+		int timeout_ms = -1;
+
+		if (timeout_ts) timeout_ms = (int)(timeout_ts->tv_sec * 1000 + timeout_ts->tv_nsec / 1000000);
+		if (sigmask && pthread_sigmask(SIG_SETMASK, sigmask, &old_sigmask) != 0) return -1;
+
+		int result = poll(fds, nfds, timeout_ms);
+
+		if (sigmask) pthread_sigmask(SIG_SETMASK, &old_sigmask, NULL);
+
+		return result;
 	#endif
-
-	/* Fallback using poll and signal masking */
-	sigset_t old_sigmask;
-	int timeout_ms = -1;
-
-	if (timeout_ts) {
-		timeout_ms = (int)(timeout_ts->tv_sec * 1000 + timeout_ts->tv_nsec / 1000000);
-	}
-
-	if (sigmask && pthread_sigmask(SIG_SETMASK, sigmask, &old_sigmask) != 0) return -1;
-
-	int result = poll(fds, nfds, timeout_ms);
-
-	if (sigmask) pthread_sigmask(SIG_SETMASK, &old_sigmask, NULL);
-
-	return result;
 }
+
 
 #endif
 
@@ -494,16 +453,14 @@ static inline int poll_validate(const struct pollfd fds[], nfds_t nfds) {
 		}
 
 		/* Check for invalid event flags */
-		short valid_events = POLLIN | POLLOUT | POLLPRI | POLLRDNORM | POLLRDBAND | POLLWRNORM | POLLWRBAND;
+		short valid_events = POLLIN | POLLOUT | POLLPRI | POLLERR | POLLHUP | POLLNVAL |
+		                     POLLRDNORM | POLLRDBAND | POLLWRNORM | POLLWRBAND;
 
 		#if JACL_OS_LINUX
-			valid_events |= POLLRDHUP | POLLMSG;
+			valid_events |= POLLRDHUP | POLLMSG | POLLREMOVE;
 		#endif
 
-		if (fds[i].events & ~valid_events) {
-			errno = EINVAL;
-			return -1;
-		}
+		if (fds[i].events & ~valid_events) { errno = EINVAL; return -1; }
 	}
 
 	return 0;
@@ -512,6 +469,11 @@ static inline int poll_validate(const struct pollfd fds[], nfds_t nfds) {
 // Thread-safe event string conversion
 static inline int poll_events_to_string_r(short events, char *buf, size_t bufsize) {
 	if (!buf || bufsize == 0) return -1;
+
+	if (events == 0) {
+		snprintf(buf, bufsize, "(none)");
+		return 0;
+	}
 
 	buf[0] = '\0';
 	size_t pos = 0;

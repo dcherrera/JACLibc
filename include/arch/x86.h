@@ -9,6 +9,9 @@
 	#define JACL_ARCH x86
 	#define JACL_ARCH_X86 1
 	#define __jacl_arch_syscall __x86_syscall
+	#define __jacl_arch_tls_set __x86_set_gs_register
+	#define __jacl_arch_tls_get __x86_get_gs_register
+	#define __jacl_arch_clone_thread __x86_clone_thread
 	#define JACL_BITS 32
 #undef __ARCH_CONFIG
 #endif
@@ -65,6 +68,47 @@
 		return result;
 	}
 #undef __ARCH_TLS
+#endif
+
+#ifdef __ARCH_CLONE && JACL_OS_LINUX
+	static inline pid_t __x86_clone_thread(void *stack, size_t stack_size, int (*fn)(void *), void *arg) {
+		char *stack_top = (char *)stack + stack_size;
+		stack_top = (char *)((uintptr_t)stack_top & ~15UL) - 4;
+
+		int flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
+		long ret;
+
+		__asm__ volatile(
+			"pushl %5\n\t"
+			"pushl %4\n\t"
+			"movl $120, %%eax\n\t"
+			"movl %2, %%ebx\n\t"
+			"movl %3, %%ecx\n\t"
+			"xor %%edx, %%edx\n\t"
+			"xor %%esi, %%esi\n\t"
+			"xor %%edi, %%edi\n\t"
+			"int $0x80\n\t"
+			"test %%eax, %%eax\n\t"
+			"jnz 1f\n\t"
+
+			"popl %%ecx\n\t"
+			"popl %%eax\n\t"
+			"xor %%ebp, %%ebp\n\t"
+			"push %%eax\n\t"
+			"call *%%ecx\n\t"
+			"movl $1, %%eax\n\t"
+			"int $0x80\n\t"
+
+			"1:\n\t"
+			"addl $8, %%esp\n\t"
+			: "=a"(ret)
+			: "a"((long)120), "r"((long)flags), "r"(stack_top), "r"(fn), "r"(arg)
+			: "ebx", "ecx", "edx", "esi", "edi", "memory"
+		);
+
+		return ret;
+	}
+#undef __ARCH_CLONE
 #endif
 
 #ifdef __cplusplus

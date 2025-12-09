@@ -776,8 +776,6 @@ static inline void __jacl_test_report(void) {
 	fflush(stdout); \
 	return r; \
 }
-#else
-#define TEST_MAIN() TEST_RUN()
 #endif
 
 #endif /* TESTING_H */

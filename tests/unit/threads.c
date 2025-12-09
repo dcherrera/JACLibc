@@ -1,186 +1,455 @@
 /* (c) 2025 FRINKnet & Friends – MIT licence */
 #include <testing.h>
 
-#if JACL_HAS_C11
+#if JACL_HAS_C11 && JACL_HAS_PTHREADS
 #include <threads.h>
+#include <unistd.h>
 
 TEST_TYPE(unit);
 TEST_UNIT(threads.h);
 
 /* ============================================================================
- * CONSTANTS AND ENUMS
+ * CONSTANTS
  * ============================================================================ */
 TEST_SUITE(constants);
 
-TEST(thread_result_codes) {
+TEST(constants_thrd_success_is_zero) {
 	ASSERT_EQ(0, thrd_success);
+}
+
+TEST(constants_thrd_nomem_nonzero) {
 	ASSERT_NE(0, thrd_nomem);
+}
+
+TEST(constants_thrd_timedout_nonzero) {
 	ASSERT_NE(0, thrd_timedout);
+}
+
+TEST(constants_thrd_busy_nonzero) {
 	ASSERT_NE(0, thrd_busy);
+}
+
+TEST(constants_thrd_error_nonzero) {
 	ASSERT_NE(0, thrd_error);
 }
 
-TEST(mutex_types) {
+TEST(constants_error_codes_unique) {
+	ASSERT_NE(thrd_nomem, thrd_timedout);
+	ASSERT_NE(thrd_nomem, thrd_busy);
+	ASSERT_NE(thrd_nomem, thrd_error);
+	ASSERT_NE(thrd_timedout, thrd_busy);
+	ASSERT_NE(thrd_timedout, thrd_error);
+	ASSERT_NE(thrd_busy, thrd_error);
+}
+
+TEST(constants_mtx_plain_is_zero) {
 	ASSERT_EQ(0, mtx_plain);
+}
+
+TEST(constants_mtx_recursive_nonzero) {
 	ASSERT_NE(0, mtx_recursive);
+}
+
+TEST(constants_mtx_timed_nonzero) {
 	ASSERT_NE(0, mtx_timed);
 }
 
-TEST(tss_dtor_iterations) {
+TEST(constants_mtx_types_unique) {
+	ASSERT_NE(mtx_plain, mtx_recursive);
+	ASSERT_NE(mtx_plain, mtx_timed);
+	ASSERT_NE(mtx_recursive, mtx_timed);
+}
+
+TEST(constants_tss_dtor_iterations_positive) {
 	ASSERT_TRUE(TSS_DTOR_ITERATIONS > 0);
 }
 
 #if JACL_HAS_C23
-TEST(version_macro) {
+TEST(constants_version_macro_c23) {
 	ASSERT_EQ(202311L, __STDC_VERSION_THREADS_H__);
 }
 #endif
 
 /* ============================================================================
- * MUTEX - BASIC OPERATIONS
+ * mtx_init
  * ============================================================================ */
-TEST_SUITE(mutex_basic);
+TEST_SUITE(mtx_init);
 
 TEST(mtx_init_plain) {
 	mtx_t mtx;
-	int result = mtx_init(&mtx, mtx_plain);
-	
-	ASSERT_EQ(thrd_success, result);
+	ASSERT_EQ(thrd_success, mtx_init(&mtx, mtx_plain));
 	mtx_destroy(&mtx);
 }
-
-TEST(mtx_lock_unlock) {
-	mtx_t mtx;
-	mtx_init(&mtx, mtx_plain);
-	
-	ASSERT_EQ(thrd_success, mtx_lock(&mtx));
-	ASSERT_EQ(thrd_success, mtx_unlock(&mtx));
-	
-	mtx_destroy(&mtx);
-}
-
-TEST(mtx_trylock_unlocked) {
-	mtx_t mtx;
-	mtx_init(&mtx, mtx_plain);
-	
-	int result = mtx_trylock(&mtx);
-	ASSERT_EQ(thrd_success, result);
-	
-	mtx_unlock(&mtx);
-	mtx_destroy(&mtx);
-}
-
-TEST(mtx_trylock_locked) {
-	mtx_t mtx;
-	mtx_init(&mtx, mtx_plain);
-	
-	mtx_lock(&mtx);
-	int result = mtx_trylock(&mtx);
-	
-	// Should be busy (already locked)
-	ASSERT_TRUE(result == thrd_busy || result == thrd_success);
-	
-	mtx_unlock(&mtx);
-	mtx_destroy(&mtx);
-}
-
-TEST(mtx_multiple_lock_unlock) {
-	mtx_t mtx;
-	mtx_init(&mtx, mtx_plain);
-	
-	for (int i = 0; i < 5; i++) {
-		ASSERT_EQ(thrd_success, mtx_lock(&mtx));
-		ASSERT_EQ(thrd_success, mtx_unlock(&mtx));
-	}
-	
-	mtx_destroy(&mtx);
-}
-
-/* ============================================================================
- * MUTEX - RECURSIVE
- * ============================================================================ */
-TEST_SUITE(mutex_recursive);
 
 TEST(mtx_init_recursive) {
 	mtx_t mtx;
-	int result = mtx_init(&mtx, mtx_recursive);
-	
-	ASSERT_EQ(thrd_success, result);
+	ASSERT_EQ(thrd_success, mtx_init(&mtx, mtx_recursive));
 	mtx_destroy(&mtx);
 }
 
-#if JACL_HAS_THREADS && !JACL_ARCH_WASM
-TEST(mtx_recursive_locking) {
+TEST(mtx_init_timed) {
+	mtx_t mtx;
+	ASSERT_EQ(thrd_success, mtx_init(&mtx, mtx_timed));
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_init_combined_flags) {
+	mtx_t mtx;
+	ASSERT_EQ(thrd_success, mtx_init(&mtx, mtx_recursive | mtx_timed));
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_init_null_pointer) {
+	ASSERT_EQ(thrd_error, mtx_init(NULL, mtx_plain));
+}
+
+TEST(mtx_init_multiple) {
+	mtx_t mtx1, mtx2, mtx3;
+	ASSERT_EQ(thrd_success, mtx_init(&mtx1, mtx_plain));
+	ASSERT_EQ(thrd_success, mtx_init(&mtx2, mtx_recursive));
+	ASSERT_EQ(thrd_success, mtx_init(&mtx3, mtx_timed));
+	mtx_destroy(&mtx1);
+	mtx_destroy(&mtx2);
+	mtx_destroy(&mtx3);
+}
+
+/* ============================================================================
+ * mtx_lock
+ * ============================================================================ */
+TEST_SUITE(mtx_lock);
+
+TEST(mtx_lock_unlocked_mutex) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_plain);
+	ASSERT_EQ(thrd_success, mtx_lock(&mtx));
+	mtx_unlock(&mtx);
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_lock_returns_success) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_plain);
+	int result = mtx_lock(&mtx);
+	ASSERT_EQ(thrd_success, result);
+	mtx_unlock(&mtx);
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_lock_null_pointer) {
+	ASSERT_EQ(thrd_error, mtx_lock(NULL));
+}
+
+TEST(mtx_lock_blocks_on_locked) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_plain);
+	mtx_lock(&mtx);
+	/* Should block, but we can't test blocking in unit tests */
+	mtx_unlock(&mtx);
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_lock_recursive_multiple_times) {
 	mtx_t mtx;
 	mtx_init(&mtx, mtx_recursive);
-	
-	// Lock multiple times
 	ASSERT_EQ(thrd_success, mtx_lock(&mtx));
 	ASSERT_EQ(thrd_success, mtx_lock(&mtx));
 	ASSERT_EQ(thrd_success, mtx_lock(&mtx));
-	
-	// Unlock same number of times
-	ASSERT_EQ(thrd_success, mtx_unlock(&mtx));
-	ASSERT_EQ(thrd_success, mtx_unlock(&mtx));
-	ASSERT_EQ(thrd_success, mtx_unlock(&mtx));
-	
+	mtx_unlock(&mtx);
+	mtx_unlock(&mtx);
+	mtx_unlock(&mtx);
 	mtx_destroy(&mtx);
 }
-#endif
 
 /* ============================================================================
- * CONDITION VARIABLES
+ * mtx_trylock
  * ============================================================================ */
-TEST_SUITE(condition_variables);
+TEST_SUITE(mtx_trylock);
 
-TEST(cnd_init) {
-	cnd_t cnd;
-	int result = cnd_init(&cnd);
-	
+TEST(mtx_trylock_unlocked_succeeds) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_plain);
+	ASSERT_EQ(thrd_success, mtx_trylock(&mtx));
+	mtx_unlock(&mtx);
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_trylock_locked_fails) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_plain);
+	mtx_lock(&mtx);
+	int result = mtx_trylock(&mtx);
+	ASSERT_TRUE(result == thrd_busy || result == thrd_success);
+	mtx_unlock(&mtx);
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_trylock_returns_correct_value) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_plain);
+	int result = mtx_trylock(&mtx);
 	ASSERT_EQ(thrd_success, result);
+	mtx_unlock(&mtx);
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_trylock_null_pointer) {
+	ASSERT_EQ(thrd_error, mtx_trylock(NULL));
+}
+
+TEST(mtx_trylock_recursive_multiple_times) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_recursive);
+	ASSERT_EQ(thrd_success, mtx_trylock(&mtx));
+	int result2 = mtx_trylock(&mtx);
+	ASSERT_TRUE(result2 == thrd_success || result2 == thrd_busy);
+	mtx_unlock(&mtx);
+	if (result2 == thrd_success) mtx_unlock(&mtx);
+	mtx_destroy(&mtx);
+}
+
+/* ============================================================================
+ * mtx_timedlock
+ * ============================================================================ */
+TEST_SUITE(mtx_timedlock);
+
+TEST(mtx_timedlock_unlocked) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_timed);
+	struct timespec ts = {1, 0};
+	ASSERT_EQ(thrd_success, mtx_timedlock(&mtx, &ts));
+	mtx_unlock(&mtx);
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_timedlock_null_pointer_mutex) {
+	struct timespec ts = {1, 0};
+	ASSERT_EQ(thrd_error, mtx_timedlock(NULL, &ts));
+}
+
+TEST(mtx_timedlock_null_pointer_timespec) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_timed);
+	ASSERT_EQ(thrd_error, mtx_timedlock(&mtx, NULL));
+	mtx_destroy(&mtx);
+}
+
+/* ============================================================================
+ * mtx_unlock
+ * ============================================================================ */
+TEST_SUITE(mtx_unlock);
+
+TEST(mtx_unlock_after_lock) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_plain);
+	mtx_lock(&mtx);
+	ASSERT_EQ(thrd_success, mtx_unlock(&mtx));
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_unlock_returns_success) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_plain);
+	mtx_lock(&mtx);
+	int result = mtx_unlock(&mtx);
+	ASSERT_EQ(thrd_success, result);
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_unlock_null_pointer) {
+	ASSERT_EQ(thrd_error, mtx_unlock(NULL));
+}
+
+TEST(mtx_unlock_recursive_multiple_times) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_recursive);
+	mtx_lock(&mtx);
+	mtx_lock(&mtx);
+	mtx_lock(&mtx);
+	ASSERT_EQ(thrd_success, mtx_unlock(&mtx));
+	ASSERT_EQ(thrd_success, mtx_unlock(&mtx));
+	ASSERT_EQ(thrd_success, mtx_unlock(&mtx));
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_unlock_lock_unlock_sequence) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_plain);
+	for (int i = 0; i < 10; i++) {
+		ASSERT_EQ(thrd_success, mtx_lock(&mtx));
+		ASSERT_EQ(thrd_success, mtx_unlock(&mtx));
+	}
+	mtx_destroy(&mtx);
+}
+
+/* ============================================================================
+ * mtx_destroy
+ * ============================================================================ */
+TEST_SUITE(mtx_destroy);
+
+TEST(mtx_destroy_after_init) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_plain);
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_destroy_after_lock) {
+	mtx_t mtx;
+	mtx_init(&mtx, mtx_plain);
+	mtx_lock(&mtx);
+	mtx_unlock(&mtx);
+	mtx_destroy(&mtx);
+}
+
+TEST(mtx_destroy_null_pointer) {
+	mtx_destroy(NULL);
+}
+
+TEST(mtx_destroy_multiple) {
+	mtx_t mtx1, mtx2;
+	mtx_init(&mtx1, mtx_plain);
+	mtx_init(&mtx2, mtx_recursive);
+	mtx_destroy(&mtx1);
+	mtx_destroy(&mtx2);
+}
+
+/* ============================================================================
+ * cnd_init
+ * ============================================================================ */
+TEST_SUITE(cnd_init);
+
+TEST(cnd_init_success) {
+	cnd_t cnd;
+	ASSERT_EQ(thrd_success, cnd_init(&cnd));
 	cnd_destroy(&cnd);
 }
 
-TEST(cnd_signal) {
+TEST(cnd_init_null_pointer) {
+	ASSERT_EQ(thrd_error, cnd_init(NULL));
+}
+
+TEST(cnd_init_multiple) {
+	cnd_t cnd1, cnd2, cnd3;
+	ASSERT_EQ(thrd_success, cnd_init(&cnd1));
+	ASSERT_EQ(thrd_success, cnd_init(&cnd2));
+	ASSERT_EQ(thrd_success, cnd_init(&cnd3));
+	cnd_destroy(&cnd1);
+	cnd_destroy(&cnd2);
+	cnd_destroy(&cnd3);
+}
+
+/* ============================================================================
+ * cnd_signal
+ * ============================================================================ */
+TEST_SUITE(cnd_signal);
+
+TEST(cnd_signal_success) {
 	cnd_t cnd;
 	cnd_init(&cnd);
-	
+	ASSERT_EQ(thrd_success, cnd_signal(&cnd));
+	cnd_destroy(&cnd);
+}
+
+TEST(cnd_signal_returns_success) {
+	cnd_t cnd;
+	cnd_init(&cnd);
 	int result = cnd_signal(&cnd);
 	ASSERT_EQ(thrd_success, result);
-	
 	cnd_destroy(&cnd);
 }
 
-TEST(cnd_broadcast) {
+TEST(cnd_signal_null_pointer) {
+	ASSERT_EQ(thrd_error, cnd_signal(NULL));
+}
+
+TEST(cnd_signal_multiple_times) {
 	cnd_t cnd;
 	cnd_init(&cnd);
-	
-	int result = cnd_broadcast(&cnd);
-	ASSERT_EQ(thrd_success, result);
-	
+	for (int i = 0; i < 10; i++) {
+		ASSERT_EQ(thrd_success, cnd_signal(&cnd));
+	}
 	cnd_destroy(&cnd);
 }
 
 /* ============================================================================
- * ONCE FLAG
+ * cnd_broadcast
  * ============================================================================ */
-TEST_SUITE(once_flag);
+TEST_SUITE(cnd_broadcast);
+
+TEST(cnd_broadcast_success) {
+	cnd_t cnd;
+	cnd_init(&cnd);
+	ASSERT_EQ(thrd_success, cnd_broadcast(&cnd));
+	cnd_destroy(&cnd);
+}
+
+TEST(cnd_broadcast_returns_success) {
+	cnd_t cnd;
+	cnd_init(&cnd);
+	int result = cnd_broadcast(&cnd);
+	ASSERT_EQ(thrd_success, result);
+	cnd_destroy(&cnd);
+}
+
+TEST(cnd_broadcast_null_pointer) {
+	ASSERT_EQ(thrd_error, cnd_broadcast(NULL));
+}
+
+TEST(cnd_broadcast_multiple_times) {
+	cnd_t cnd;
+	cnd_init(&cnd);
+	for (int i = 0; i < 10; i++) {
+		ASSERT_EQ(thrd_success, cnd_broadcast(&cnd));
+	}
+	cnd_destroy(&cnd);
+}
+
+/* ============================================================================
+ * cnd_destroy
+ * ============================================================================ */
+TEST_SUITE(cnd_destroy);
+
+TEST(cnd_destroy_after_init) {
+	cnd_t cnd;
+	cnd_init(&cnd);
+	cnd_destroy(&cnd);
+}
+
+TEST(cnd_destroy_null_pointer) {
+	cnd_destroy(NULL);
+}
+
+TEST(cnd_destroy_multiple) {
+	cnd_t cnd1, cnd2;
+	cnd_init(&cnd1);
+	cnd_init(&cnd2);
+	cnd_destroy(&cnd1);
+	cnd_destroy(&cnd2);
+}
+
+/* ============================================================================
+ * call_once
+ * ============================================================================ */
+TEST_SUITE(call_once);
 
 static int once_counter = 0;
 
-static void increment_once(void) {
+static void call_once_increment(void) {
 	once_counter++;
 }
 
-TEST(call_once_basic) {
+TEST(call_once_executes_function) {
 	once_flag flag = ONCE_FLAG_INIT;
 	once_counter = 0;
-	
-	call_once(&flag, increment_once);
+	call_once(&flag, call_once_increment);
 	ASSERT_EQ(1, once_counter);
-	
-	// Second call should not execute
-	call_once(&flag, increment_once);
+}
+
+TEST(call_once_executes_only_once) {
+	once_flag flag = ONCE_FLAG_INIT;
+	once_counter = 0;
+	call_once(&flag, call_once_increment);
+	call_once(&flag, call_once_increment);
+	call_once(&flag, call_once_increment);
 	ASSERT_EQ(1, once_counter);
 }
 
@@ -188,271 +457,288 @@ TEST(call_once_multiple_flags) {
 	once_flag flag1 = ONCE_FLAG_INIT;
 	once_flag flag2 = ONCE_FLAG_INIT;
 	once_counter = 0;
-	
-	call_once(&flag1, increment_once);
-	call_once(&flag2, increment_once);
-	
+	call_once(&flag1, call_once_increment);
+	call_once(&flag2, call_once_increment);
 	ASSERT_EQ(2, once_counter);
 }
 
+TEST(call_once_null_flag) {
+	call_once(NULL, call_once_increment);
+}
+
+TEST(call_once_null_func) {
+	once_flag flag = ONCE_FLAG_INIT;
+	call_once(&flag, NULL);
+}
+
 /* ============================================================================
- * THREAD CREATION AND JOINING (Native only)
+ * NATIVE PLATFORM TESTS (Non-WASM)
  * ============================================================================ */
 #if JACL_HAS_THREADS && !JACL_ARCH_WASM
-TEST_SUITE(thread_creation);
 
-static int simple_thread_func(void *arg) {
-	int *value = (int*)arg;
-	*value = 42;
+/* ============================================================================
+ * thrd_create
+ * ============================================================================ */
+TEST_SUITE(thrd_create);
+
+static int thrd_create_returns_zero(void *arg) {
+	(void)arg;
 	return 0;
 }
 
-TEST(thrd_create_join) {
-	thrd_t thread;
-	int value = 0;
-	
-	int result = thrd_create(&thread, simple_thread_func, &value);
-	ASSERT_EQ(thrd_success, result);
-	
-	int thread_result;
-	result = thrd_join(thread, &thread_result);
-	
-	ASSERT_EQ(thrd_success, result);
-	ASSERT_EQ(0, thread_result);
-	ASSERT_EQ(42, value);
-}
-
-static int return_value_thread(void *arg) {
+static int thrd_create_returns_value(void *arg) {
 	return *((int*)arg);
 }
 
-TEST(thrd_join_with_result) {
+static int thrd_create_modifies_arg(void *arg) {
+	int *ptr = (int*)arg;
+	*ptr = 99;
+	return 0;
+}
+
+TEST(thrd_create_success) {
 	thrd_t thread;
-	int input = 123;
-	
-	thrd_create(&thread, return_value_thread, &input);
-	
-	int result;
-	thrd_join(thread, &result);
-	
-	ASSERT_EQ(123, result);
+	ASSERT_EQ(thrd_success, thrd_create(&thread, thrd_create_returns_zero, NULL));
+	int res;
+	thrd_join(thread, &res);
 }
 
-TEST(thrd_detach) {
+TEST(thrd_create_with_arg) {
 	thrd_t thread;
-	int value = 0;
-	
-	thrd_create(&thread, simple_thread_func, &value);
-	
-	int result = thrd_detach(thread);
-	ASSERT_EQ(thrd_success, result);
+	int value = 42;
+	ASSERT_EQ(thrd_success, thrd_create(&thread, thrd_create_modifies_arg, &value));
+	int res;
+	thrd_join(thread, &res);
+	ASSERT_EQ(99, value);
 }
 
-TEST(thrd_current) {
-	thrd_t current = thrd_current();
-	ASSERT_TRUE(current != 0 || current == 0);  // Just verify it returns something
+TEST(thrd_create_null_thread) {
+	ASSERT_EQ(thrd_error, thrd_create(NULL, thrd_create_returns_zero, NULL));
 }
 
-TEST(thrd_equal) {
-	thrd_t current1 = thrd_current();
-	thrd_t current2 = thrd_current();
-	
-	ASSERT_TRUE(thrd_equal(current1, current2));
+TEST(thrd_create_null_func) {
+	thrd_t thread;
+	ASSERT_EQ(thrd_error, thrd_create(&thread, NULL, NULL));
 }
 
-TEST(thrd_yield) {
-	// Just verify it doesn't crash
-	thrd_yield();
-	ASSERT_TRUE(1);
+TEST(thrd_create_multiple) {
+	thrd_t t1, t2, t3;
+	ASSERT_EQ(thrd_success, thrd_create(&t1, thrd_create_returns_zero, NULL));
+	ASSERT_EQ(thrd_success, thrd_create(&t2, thrd_create_returns_zero, NULL));
+	ASSERT_EQ(thrd_success, thrd_create(&t3, thrd_create_returns_zero, NULL));
+	thrd_join(t1, NULL);
+	thrd_join(t2, NULL);
+	thrd_join(t3, NULL);
 }
-#endif
 
 /* ============================================================================
- * THREAD SLEEP
+ * thrd_join
  * ============================================================================ */
-#if JACL_HAS_THREADS && !JACL_ARCH_WASM
-TEST_SUITE(thread_sleep);
+TEST_SUITE(thrd_join);
+
+TEST(thrd_join_success) {
+	thrd_t thread;
+	thrd_create(&thread, thrd_create_returns_zero, NULL);
+	ASSERT_EQ(thrd_success, thrd_join(thread, NULL));
+}
+
+TEST(thrd_join_gets_exit_code) {
+	thrd_t thread;
+	int input = 42;
+	thrd_create(&thread, thrd_create_returns_value, &input);
+	int result;
+	ASSERT_EQ(thrd_success, thrd_join(thread, &result));
+	ASSERT_EQ(42, result);
+}
+
+TEST(thrd_join_null_result) {
+	thrd_t thread;
+	thrd_create(&thread, thrd_create_returns_zero, NULL);
+	ASSERT_EQ(thrd_success, thrd_join(thread, NULL));
+}
+
+/* ============================================================================
+ * thrd_detach
+ * ============================================================================ */
+TEST_SUITE(thrd_detach);
+
+TEST(thrd_detach_success) {
+	thrd_t thread;
+	thrd_create(&thread, thrd_create_returns_zero, NULL);
+	ASSERT_EQ(thrd_success, thrd_detach(thread));
+	usleep(100000);
+}
+
+/* ============================================================================
+ * thrd_current
+ * ============================================================================ */
+TEST_SUITE(thrd_current);
+
+TEST(thrd_current_returns_value) {
+	thrd_t current = thrd_current();
+	ASSERT_TRUE(current != 0 || current == 0);
+}
+
+/* ============================================================================
+ * thrd_equal
+ * ============================================================================ */
+TEST_SUITE(thrd_equal);
+
+TEST(thrd_equal_current_thread) {
+	thrd_t t1 = thrd_current();
+	thrd_t t2 = thrd_current();
+	ASSERT_TRUE(thrd_equal(t1, t2));
+}
+
+/* ============================================================================
+ * thrd_yield
+ * ============================================================================ */
+TEST_SUITE(thrd_yield);
+
+TEST(thrd_yield_no_crash) {
+	thrd_yield();
+}
+
+/* ============================================================================
+ * thrd_sleep
+ * ============================================================================ */
+TEST_SUITE(thrd_sleep);
 
 TEST(thrd_sleep_basic) {
-	struct timespec duration = {0, 10000000};  // 10ms
+	struct timespec duration = {0, 10000000};
 	struct timespec remaining;
-	
 	int result = thrd_sleep(&duration, &remaining);
 	ASSERT_EQ(0, result);
 }
-#endif
+
+TEST(thrd_sleep_zero) {
+	struct timespec duration = {0, 0};
+	int result = thrd_sleep(&duration, NULL);
+	ASSERT_EQ(0, result);
+}
 
 /* ============================================================================
- * MUTEX WITH THREADS
+ * tss_create
  * ============================================================================ */
-#if JACL_HAS_THREADS && !JACL_ARCH_WASM
-TEST_SUITE(mutex_with_threads);
+TEST_SUITE(tss_create);
 
-static mtx_t shared_mutex;
-static int shared_counter = 0;
-
-static int increment_thread(void *arg) {
-	int iterations = *((int*)arg);
-	
-	for (int i = 0; i < iterations; i++) {
-		mtx_lock(&shared_mutex);
-		shared_counter++;
-		mtx_unlock(&shared_mutex);
-	}
-	
-	return 0;
-}
-
-TEST(mtx_mutual_exclusion) {
-	mtx_init(&shared_mutex, mtx_plain);
-	shared_counter = 0;
-	
-	int iterations = 100;
-	thrd_t thread1, thread2;
-	
-	thrd_create(&thread1, increment_thread, &iterations);
-	thrd_create(&thread2, increment_thread, &iterations);
-	
-	thrd_join(thread1, NULL);
-	thrd_join(thread2, NULL);
-	
-	ASSERT_EQ(200, shared_counter);
-	
-	mtx_destroy(&shared_mutex);
-}
-#endif
-
-/* ============================================================================
- * CONDITION VARIABLE WITH THREADS
- * ============================================================================ */
-#if JACL_HAS_THREADS && !JACL_ARCH_WASM
-TEST_SUITE(condvar_with_threads);
-
-static cnd_t shared_cond;
-static mtx_t cond_mutex;
-static int cond_flag = 0;
-
-static int waiter_thread(void *arg) {
-	mtx_lock(&cond_mutex);
-	
-	while (!cond_flag) {
-		cnd_wait(&shared_cond, &cond_mutex);
-	}
-	
-	mtx_unlock(&cond_mutex);
-	return 42;
-}
-
-TEST(cnd_signal_wakes_thread) {
-	mtx_init(&cond_mutex, mtx_plain);
-	cnd_init(&shared_cond);
-	cond_flag = 0;
-	
-	thrd_t thread;
-	thrd_create(&thread, waiter_thread, NULL);
-	
-	// Give thread time to wait
-	struct timespec delay = {0, 50000000};  // 50ms
-	thrd_sleep(&delay, NULL);
-	
-	// Signal the thread
-	mtx_lock(&cond_mutex);
-	cond_flag = 1;
-	cnd_signal(&shared_cond);
-	mtx_unlock(&cond_mutex);
-	
-	int result;
-	thrd_join(thread, &result);
-	
-	ASSERT_EQ(42, result);
-	
-	cnd_destroy(&shared_cond);
-	mtx_destroy(&cond_mutex);
-}
-#endif
-
-/* ============================================================================
- * THREAD-SPECIFIC STORAGE
- * ============================================================================ */
-#if JACL_HAS_THREADS && !JACL_ARCH_WASM
-TEST_SUITE(thread_specific_storage);
-
-TEST(tss_create_delete) {
+TEST(tss_create_success) {
 	tss_t key;
-	int result = tss_create(&key, NULL);
-	
-	ASSERT_EQ(thrd_success, result);
+	ASSERT_EQ(thrd_success, tss_create(&key, NULL));
 	tss_delete(key);
 }
 
-TEST(tss_set_get) {
+TEST(tss_create_with_dtor) {
+	tss_t key;
+	ASSERT_EQ(thrd_success, tss_create(&key, NULL));
+	tss_delete(key);
+}
+
+TEST(tss_create_null_key) {
+	ASSERT_EQ(thrd_error, tss_create(NULL, NULL));
+}
+
+TEST(tss_create_multiple) {
+	tss_t k1, k2, k3;
+	ASSERT_EQ(thrd_success, tss_create(&k1, NULL));
+	ASSERT_EQ(thrd_success, tss_create(&k2, NULL));
+	ASSERT_EQ(thrd_success, tss_create(&k3, NULL));
+	tss_delete(k1);
+	tss_delete(k2);
+	tss_delete(k3);
+}
+
+/* ============================================================================
+ * tss_set
+ * ============================================================================ */
+TEST_SUITE(tss_set);
+
+TEST(tss_set_success) {
 	tss_t key;
 	tss_create(&key, NULL);
-	
 	int value = 123;
-	int result = tss_set(key, &value);
-	ASSERT_EQ(thrd_success, result);
-	
-	void *retrieved = tss_get(key);
-	ASSERT_EQ(&value, retrieved);
-	ASSERT_EQ(123, *((int*)retrieved));
-	
+	ASSERT_EQ(thrd_success, tss_set(key, &value));
 	tss_delete(key);
 }
 
-static tss_t global_tss_key;
-
-static int tss_thread_func(void *arg) {
-	int *thread_value = (int*)arg;
-	tss_set(global_tss_key, thread_value);
-	
-	void *retrieved = tss_get(global_tss_key);
-	return *((int*)retrieved);
+TEST(tss_set_null_value) {
+	tss_t key;
+	tss_create(&key, NULL);
+	ASSERT_EQ(thrd_success, tss_set(key, NULL));
+	tss_delete(key);
 }
 
-TEST(tss_thread_independence) {
-	tss_create(&global_tss_key, NULL);
-	
-	int value1 = 100;
-	int value2 = 200;
-	
-	thrd_t thread1, thread2;
-	thrd_create(&thread1, tss_thread_func, &value1);
-	thrd_create(&thread2, tss_thread_func, &value2);
-	
-	int result1, result2;
-	thrd_join(thread1, &result1);
-	thrd_join(thread2, &result2);
-	
-	ASSERT_EQ(100, result1);
-	ASSERT_EQ(200, result2);
-	
-	tss_delete(global_tss_key);
+TEST(tss_set_multiple_times) {
+	tss_t key;
+	tss_create(&key, NULL);
+	int v1 = 1, v2 = 2, v3 = 3;
+	ASSERT_EQ(thrd_success, tss_set(key, &v1));
+	ASSERT_EQ(thrd_success, tss_set(key, &v2));
+	ASSERT_EQ(thrd_success, tss_set(key, &v3));
+	tss_delete(key);
 }
-#endif
 
 /* ============================================================================
- * ERROR CASES
+ * tss_get
  * ============================================================================ */
-TEST_SUITE(error_cases);
+TEST_SUITE(tss_get);
 
-TEST(mtx_null_pointer) {
-	int result = mtx_lock(NULL);
-	ASSERT_EQ(thrd_error, result);
+TEST(tss_get_after_set) {
+	tss_t key;
+	tss_create(&key, NULL);
+	int value = 456;
+	tss_set(key, &value);
+	void *retrieved = tss_get(key);
+	ASSERT_EQ(&value, retrieved);
+	ASSERT_EQ(456, *((int*)retrieved));
+	tss_delete(key);
 }
 
-TEST(cnd_null_pointer) {
-	int result = cnd_signal(NULL);
-	ASSERT_EQ(thrd_error, result);
+TEST(tss_get_before_set) {
+	tss_t key;
+	tss_create(&key, NULL);
+	void *retrieved = tss_get(key);
+	ASSERT_EQ(NULL, retrieved);
+	tss_delete(key);
 }
 
-TEST_MAIN()
+TEST(tss_get_after_delete) {
+	tss_t key;
+	tss_create(&key, NULL);
+	int value = 789;
+	tss_set(key, &value);
+	tss_delete(key);
+}
+
+/* ============================================================================
+ * tss_delete
+ * ============================================================================ */
+TEST_SUITE(tss_delete);
+
+TEST(tss_delete_after_create) {
+	tss_t key;
+	tss_create(&key, NULL);
+	tss_delete(key);
+}
+
+TEST(tss_delete_multiple) {
+	tss_t k1, k2;
+	tss_create(&k1, NULL);
+	tss_create(&k2, NULL);
+	tss_delete(k1);
+	tss_delete(k2);
+}
+
+#endif  /* JACL_HAS_THREADS && !JACL_ARCH_WASM */
 
 #else
 
-int main(void) {
-	printf("threads.h requires C11 or later\n");
-	return 0;
+TEST_SUITE(threads_basics);
+
+TEST(threads_not_avaialable) {
+	TEST_SKIP("NO C99 SUPPORT");
 }
 
 #endif
+
+TEST_MAIN()

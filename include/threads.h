@@ -41,7 +41,7 @@ typedef void (*tss_dtor_t)(void*);
 #define TSS_DTOR_ITERATIONS 4
 #endif
 
-#if !JACL_HAS_THREADS
+#if !JACL_HAS_PTHREADS
 typedef int thrd_t, mtx_t, cnd_t, tss_t;
 typedef struct { int done; } once_flag;
 

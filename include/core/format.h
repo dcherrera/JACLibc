@@ -196,6 +196,7 @@ static inline uintmax_t __jacl_get_unsigned(__jacl_fmt_t spec, va_list ap) {
 	default: return va_arg(ap, unsigned int);
 	}
 }
+
 #undef CASE
 #define CASE(N,type) case JACL_FMT_VAL(LENGTH,N): return (long double)va_arg(ap, type); break
 static inline long double __jacl_get_float(__jacl_fmt_t spec, va_list ap) {
@@ -652,11 +653,13 @@ static inline int __jacl_input_scan(FILE *stream, const char **in, size_t *read,
 	return (i > 0);
 }
 #define CASE(len, PRE, UPRE) case JACL_FMT_VAL(LENGTH, len): \
-	if (JACL_FMT_HAS(FLAG, spec, sign)) { \
+	if (JACL_FMT_HAS(FLAG, spec, sign) && (JACL_FMT_GET(BASE, spec) == JACL_FMT_BASE_dec || JACL_FMT_GET(BASE, spec) == JACL_FMT_BASE_int)) { \
 		if (neg && val > (uintmax_t)-(PRE##_MIN + 1) + 1) { errno = ERANGE; val = (uintmax_t)PRE##_MIN; } \
 		else if (!neg && val > (uintmax_t)(PRE##_MAX)) { errno = ERANGE; val = (uintmax_t)(PRE##_MAX); } \
 		else if (neg) val = (uintmax_t)(-(intmax_t)val); \
-	} else if (val > (uintmax_t)(UPRE##_MAX)) { errno = ERANGE; val = (uintmax_t)(UPRE##_MAX); } \
+	} else if (neg) { \
+		val = (uintmax_t)(-(intmax_t)val); \
+	} \
 	break
 static inline int __jacl_input_int(FILE *stream, const char **in, size_t *read, __jacl_fmt_t spec, int width, uintmax_t *rtn) {
 	int neg = 0, pos_val = 0, *pos = &pos_val, digits = 0, ch, base = JACL_FMT_GET(BASE, spec);
@@ -867,8 +870,21 @@ static inline int __jacl_scanf_float(FILE *stream, const char **in, size_t *read
 	if (width == 0) width = JACL_FMT_WIDTH_num; \
 	if (!__jacl_input_int(stream, in, read, JACL_FMT_SET(BASE, spec, name), width, &val)) return 0; \
 	if (JACL_FMT_HAS(FLAG, spec, noout)) return 1; \
-	if (JACL_FMT_HAS(FLAG, spec, sign)) __jacl_set_signed(spec, ap, val); \
+	if (JACL_FMT_GET(BASE, spec) == JACL_FMT_BASE_dec) __jacl_set_signed(spec, ap, val); \
 	else __jacl_set_unsigned(spec, ap, val); \
+	return 1; \
+}
+#define __jacl_scanf_base(name) static inline int __jacl_scanf_##name(FILE *stream, const char **in, size_t *read, __jacl_fmt_t spec, int width, va_list ap) { \
+	uintmax_t val = 0; \
+	int ch; \
+	__jacl_read_skip(ch, stream, in, read); \
+	if (width == 0) width = JACL_FMT_WIDTH_num; \
+	if (!__jacl_input_int(stream, in, read, JACL_FMT_SET(BASE, spec, name), width, &val)) return 0; \
+	if (JACL_FMT_HAS(FLAG, spec, noout)) return 1; \
+	if (JACL_FMT_GET(BASE, spec) == JACL_FMT_BASE_dec || JACL_FMT_GET(BASE, spec) == JACL_FMT_BASE_int) { \
+				if (JACL_FMT_HAS(FLAG, spec, sign)) __jacl_set_signed(spec, ap, val); \
+				else __jacl_set_unsigned(spec, ap, val); \
+			} else __jacl_set_unsigned(spec, ap, val); \
 	return 1; \
 }
 __jacl_scanf_words(str)

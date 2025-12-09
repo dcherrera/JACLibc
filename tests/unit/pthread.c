@@ -181,6 +181,25 @@ TEST(pthread_mutex_trylock_valid) {
 	pthread_mutex_destroy(&mutex);
 }
 
+TEST(pthread_mutex_timedlock_timeout) {
+	pthread_mutex_t mtx;
+
+	pthread_mutex_init(&mtx, NULL);
+
+	struct timespec ts = {0, 1000000}; // 1ms timeout
+	int result = pthread_mutex_timedlock(&mtx, &ts);
+
+	ASSERT_EQ(0, result); // should succeed immediately
+	pthread_mutex_unlock(&mtx);
+
+	pthread_mutex_lock(&mtx);
+	result = pthread_mutex_timedlock(&mtx, &ts);
+	ASSERT_EQ(ETIMEDOUT, result); // should timeout
+	pthread_mutex_unlock(&mtx);
+	pthread_mutex_destroy(&mtx);
+}
+
+
 TEST_SUITE(pthread_cond);
 
 TEST(pthread_cond_destroy_null) {
@@ -384,9 +403,7 @@ TEST(pthread_create_valid) {
 }
 
 TEST(pthread_join_null) {
-	pthread_t thread;
-
-	ASSERT_EQ(EINVAL, pthread_join(thread, NULL));
+	ASSERT_EQ(EINVAL, pthread_join(NULL, NULL));
 }
 
 TEST(pthread_join_detached) {
@@ -401,19 +418,15 @@ TEST(pthread_join_detached) {
 }
 
 TEST(pthread_join_valid) {
-	TEST_SKIP("hangs");
 	pthread_t thread;
 
-	pthread_create(&thread, NULL, threadfn, &threadval);
-	pthread_join(thread, NULL);
-
+	ASSERT_EQ(0, pthread_create(&thread, NULL, threadfn, &threadval));
+	ASSERT_EQ(0, pthread_join(thread, NULL));
 	ASSERT_EQ(42, threadval);
 }
 
 TEST(pthread_detach_null) {
-	pthread_t thread;
-
-	ASSERT_EQ(EINVAL, pthread_detach(thread));
+	ASSERT_EQ(EINVAL, pthread_detach(NULL));
 }
 
 TEST(pthread_detach_valid) {
@@ -425,21 +438,16 @@ TEST(pthread_detach_valid) {
 	usleep(10000);
 }
 
-TEST(pthread_exit) {
-	TEST_SKIP("premature exit");
-	pthread_exit(NULL);
-}
-
 static void *exit_threadfn(void *arg) {
 	(void)arg;
+
 	pthread_exit((void *)123);
+
 	return NULL; /* not reached in a conforming impl */
 }
 
-TEST(pthread_exit_thread_return) {
-	TEST_SKIP("current implementation exits the entire process");
-
-	pthread_t thread;
+TEST(pthread_exit) {
+	pthread_t thread = {0};
 	void *retval = NULL;
 
 	ASSERT_EQ(0, pthread_create(&thread, NULL, exit_threadfn, NULL));
@@ -448,4 +456,3 @@ TEST(pthread_exit_thread_return) {
 }
 
 TEST_MAIN()
-

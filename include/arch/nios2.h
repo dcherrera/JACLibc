@@ -11,6 +11,7 @@
 	#define __jacl_arch_syscall __nios2_syscall
 	#define __jacl_arch_tls_set __nios2_set_tp_register
 	#define __jacl_arch_tls_get __nios2_get_tp_register
+	#define __jacl_arch_clone_thread __nios2_clone_thread
 	#define JACL_BITS 32
 #undef __ARCH_CONFIG
 #endif
@@ -74,6 +75,41 @@
 		return result;
 	}
 #undef __ARCH_TLS
+#endif
+
+#ifdef __ARCH_CLONE && JACL_OS_LINUX
+	static inline pid_t __nios2_clone_thread(void *stack, size_t stack_size, int (*fn)(void *), void *arg) {
+		char *stack_top = (char *)stack + stack_size;
+		stack_top = (char *)((uintptr_t)stack_top & ~3UL) - 4;
+
+		int flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
+		long ret;
+
+		__asm__ volatile(
+			"mov r4, %2\n\t"
+			"mov r5, %3\n\t"
+			"mov r6, zero\n\t"
+			"mov r7, zero\n\t"
+			"mov r8, zero\n\t"
+			"movi r2, 220\n\t"
+			"trap\n\t"
+			"bne r2, zero, 1f\n\t"
+
+			"mov fp, zero\n\t"
+			"mov r4, %5\n\t"
+			"callr %4\n\t"
+			"movi r2, 93\n\t"
+			"trap\n\t"
+
+			"1:\n\t"
+			: "=r"(ret)
+			: "r"((long)220), "r"((long)flags), "r"(stack_top), "r"(fn), "r"(arg)
+			: "r2", "r4", "r5", "r6", "r7", "r8", "memory"
+		);
+
+		return ret;
+	}
+#undef __ARCH_CLONE
 #endif
 
 #ifdef __cplusplus

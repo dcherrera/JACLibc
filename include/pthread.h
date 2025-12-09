@@ -46,6 +46,9 @@ extern "C" {
 #if JACL_OS_LINUX
 	#include <sched.h>
 	#include <sys/futex.h>
+
+	#define __ARCH_CLONE
+	#include JACL_HEADER(arch,detect)
 #endif
 
 /* ================================================================ */
@@ -248,6 +251,21 @@ static inline int pthread_mutex_trylock(pthread_mutex_t *mutex) {
 	return TryEnterCriticalSection(&mutex->cs) ? 0 : EBUSY;
 }
 
+static inline int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *ts) {
+	if (!mutex || !ts) return EINVAL;
+
+	DWORD timeout = (ts->tv_sec * 1000) + (ts->tv_nsec / 1000000);
+	DWORD result = WaitForSingleObject(mutex->cs, timeout);
+
+	if (result == WAIT_OBJECT_0) {
+		return 0;
+	} else if (result == WAIT_TIMEOUT) {
+		return ETIMEDOUT;
+	} else {
+		return EINVAL;
+	}
+}
+
 static inline int pthread_mutex_unlock(pthread_mutex_t *mutex) {
 	if (!mutex) return EINVAL;
 	LeaveCriticalSection(&mutex->cs);
@@ -313,11 +331,11 @@ static inline void *pthread_getspecific(pthread_key_t key) {
 	return TlsGetValue(key);
 }
 
+#elif PTHREAD_POSIX
+
 /* ================================================================ */
 /* POSIX IMPLEMENTATION                                             */
 /* ================================================================ */
-
-#elif PTHREAD_POSIX
 
 #if JACL_OS_LINUX
 	/* linux: direct syscalls */
@@ -424,14 +442,6 @@ static inline void __jacl_pthread_set_self(pthread_t thread_ptr) {
 	if (__jacl_pthread_self_key < MAX_TLS_KEYS) __jacl_pthread_tls_values[__jacl_pthread_self_key] = thread_ptr;
 }
 
-static inline pthread_t *__jacl_pthread_get_self_ptr(void) {
-	__jacl_pthread_init();
-
-	if (__jacl_pthread_self_key < MAX_TLS_KEYS) return (pthread_t *)__jacl_pthread_tls_values[__jacl_pthread_self_key];
-
-	return NULL;
-}
-
 static inline int __jacl_pthread_entry(void *arg) {
 	struct posix_thread_arg *ta = (struct posix_thread_arg *)arg;
 
@@ -451,12 +461,7 @@ static inline int __jacl_pthread_entry(void *arg) {
 
 static inline pid_t __jacl_pthread_clone_thread(void *stack, size_t stack_size, int (*fn)(void *), void *arg) {
 	#if JACL_OS_LINUX
-		/* child stack grows downward; clone expects pointer to top */
-		char *stack_top = (char *)stack + stack_size;
-		int flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
-		long tid = syscall(SYS_clone, flags, stack_top, NULL, NULL, NULL);
-
-		return (pid_t)tid;
+		return __jacl_arch_clone_thread(stack, stack_size, fn, arg);
 	#else
 		(void)stack;
 		(void)stack_size;
@@ -471,7 +476,6 @@ static inline pid_t __jacl_pthread_clone_thread(void *stack, size_t stack_size, 
 		return pid;
 	#endif
 }
-
 
 /* Thread functions */
 static inline int pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg) {
@@ -565,24 +569,33 @@ static inline int pthread_join(pthread_t thread, void **retval) {
 }
 
 static inline pthread_t pthread_self(void) {
-	pthread_t *ptr = __jacl_pthread_get_self_ptr();
+	__jacl_pthread_init();
 
-	if (ptr) return *ptr;
+	if (__jacl_pthread_self_key < MAX_TLS_KEYS) return (pthread_t)__jacl_pthread_tls_values[__jacl_pthread_self_key];
 
 	return NULL;
 }
 
-static inline void pthread_exit(void *retval) {
-		pthread_t self = pthread_self();
+static inline noreturn void pthread_exit(void *retval) {
+	pthread_t self = pthread_self();
 
 	if (self) {
 		self->result = retval;
+
 		atomic_store(&self->finished, 1);
 	}
 
 	__jacl_pthread_destroy();
 
-	_exit(0);
+	#if JACL_OS_LINUX
+		syscall(SYS_exit, 0);
+	#elif JACL_OS_DARWIN
+		syscall(SYS_thread_terminate, 0);
+	#elif JACL_OS_FREEBSD
+		syscall(SYS_thr_exit, NULL);
+	#else
+		_exit(0);
+	#endif
 }
 
 static inline int pthread_equal(pthread_t t1, pthread_t t2) {
@@ -673,6 +686,54 @@ static inline int pthread_mutex_trylock(pthread_mutex_t *mutex) {
 	}
 
 	return EBUSY;
+}
+
+static inline int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *ts) {
+	if (!mutex || !ts) return EINVAL;
+
+	if (mutex->type == PTHREAD_MUTEX_RECURSIVE) {
+		pid_t current_tid = __jacl_pthread_gettid();
+		if (mutex->owner == current_tid) {
+			mutex->recursive_count++;
+			return 0;
+		}
+	}
+
+	// Calculate absolute timeout
+	struct timespec end;
+	clock_gettime(CLOCK_REALTIME, &end);
+	end.tv_sec += ts->tv_sec;
+	end.tv_nsec += ts->tv_nsec;
+	if (end.tv_nsec >= 1000000000) {
+		end.tv_sec++;
+		end.tv_nsec -= 1000000000;
+	}
+
+	int expected = 0;
+	int backoff = 1000;
+
+	while (!atomic_compare_exchange_weak(&mutex->futex, &expected, 1)) {
+		expected = 0;
+
+		// Check for timeout
+		struct timespec now;
+		clock_gettime(CLOCK_REALTIME, &now);
+		if (now.tv_sec > end.tv_sec || (now.tv_sec == end.tv_sec && now.tv_nsec >= end.tv_nsec)) {
+			return ETIMEDOUT;
+		}
+
+		// Wait a bit before retrying
+		struct timespec ts_wait = {0, backoff};
+		nanosleep(&ts_wait, NULL);
+		if (backoff < 1000000) backoff *= 2;
+	}
+
+	if (mutex->type == PTHREAD_MUTEX_RECURSIVE) {
+		mutex->owner = __jacl_pthread_gettid();
+		mutex->recursive_count = 1;
+	}
+
+	return 0;
 }
 
 static inline int pthread_mutex_unlock(pthread_mutex_t *mutex) {
@@ -804,119 +865,65 @@ static inline void *pthread_getspecific(pthread_key_t key) {
 	return __jacl_pthread_tls_values[key];
 }
 
-/* ================================================================ */
-/* DUMMY IMPLEMENTATION (Single-threaded stubs)                    */
-/* ================================================================ */
+static inline int pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset) {
+	#if JACL_HAS_POSIX
+		return sigprocmask(how, set, oldset);
+	#else
+		(void)how; (void)set; (void)oldset;
+		return ENOSYS;
+	#endif
+}
 
 #else /* PTHREAD_DUMMY */
 
+/* ================================================================ */
+/* DUMMY IMPLEMENTATION (Single-threaded stubs)                     */
+/* ================================================================ */
+
 /* Thread functions - all return ENOSYS */
-static inline int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
-                                void *(*start_routine)(void *), void *arg) {
-	(void)thread; (void)attr; (void)start_routine; (void)arg;
-	return ENOSYS;
-}
-
-static inline int pthread_join(pthread_t thread, void **retval) {
-	(void)thread; (void)retval;
-	return ENOSYS;
-}
-
-static inline void pthread_exit(void *retval) {
-	(void)retval;
-	exit(0);
-}
-
-static inline pthread_t pthread_self(void) {
-	pthread_t self = {0};
-	return self;
-}
-
-static inline int pthread_equal(pthread_t t1, pthread_t t2) {
-	(void)t1; (void)t2;
-	return 1;
-}
-
-static inline int pthread_detach(pthread_t thread) {
-	(void)thread;
-	return ENOSYS;
-}
+#define pthread_create(thread, attr, start_routine, arg) (ENOSYS)
+#define pthread_join(thread, retval) (ENOSYS)
+#define pthread_detach(thread) (ENOSYS)
+#define pthread_exit(retval) do { exit(0); } while(0)
+#define pthread_self() ((pthread_t){0})
+#define pthread_equal(t1, t2) (1)
 
 /* Mutex functions - no-ops (no contention in single-threaded) */
-static inline int pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr) {
-	(void)mutex; (void)attr;
-	return 0;
-}
-
-static inline int pthread_mutex_lock(pthread_mutex_t *mutex) {
-	(void)mutex;
-	return 0;
-}
-
-static inline int pthread_mutex_trylock(pthread_mutex_t *mutex) {
-	(void)mutex;
-	return 0;
-}
-
-static inline int pthread_mutex_unlock(pthread_mutex_t *mutex) {
-	(void)mutex;
-	return 0;
-}
-
-static inline int pthread_mutex_destroy(pthread_mutex_t *mutex) {
-	if (!mutex) return EINVAL;
-
-	return 0;
-}
+#define pthread_mutex_init(mutex, attr) (ENOSYS)
+#define pthread_mutex_lock(mutex) (ENOSYS)
+#define pthread_mutex_trylock(mutex) (ENOSYS)
+#define pthread_mutex_timedlock(mutex, ts) (ENOSYS)
+#define pthread_mutex_unlock(mutex) (ENOSYS)
+#define pthread_mutex_destroy(mutex) (ENOSYS)
 
 /* Condition variables - return ENOSYS */
-static inline int pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr) {
-	(void)cond; (void)attr;
-	return 0;
-}
+#define pthread_cond_init(cond, attr) (ENOSYS)
+#define pthread_cond_wait(cond, mutex) (ENOSYS)
+#define pthread_cond_signal(cond) (ENOSYS)
+#define pthread_cond_broadcast(cond) (ENOSYS)
+#define pthread_cond_destroy(cond) (ENOSYS)
 
-static inline int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex) {
-	(void)cond; (void)mutex;
-	return ENOSYS;
-}
-
-static inline int pthread_cond_signal(pthread_cond_t *cond) {
-	(void)cond;
-	return 0;
-}
-
-static inline int pthread_cond_broadcast(pthread_cond_t *cond) {
-	(void)cond;
-	return 0;
-}
-
-static inline int pthread_cond_destroy(pthread_cond_t *cond) {
-	if (!cond) return EINVAL;
-
-	return 0;
-}
+#define pthread_once(once_control, init_routine) (ENOSYS)
 
 /* Thread-local storage - return ENOSYS */
-static inline int pthread_key_create(pthread_key_t *key, void (*destructor)(void*)) {
-	(void)key; (void)destructor;
-	return ENOSYS;
-}
+#define pthread_attr_init(attr) (ENOSYS)
+#define pthread_attr_destroy(attr) (ENOSYS)
+#define pthread_attr_setdetachstate(attr, state) (ENOSYS)
+#define pthread_attr_setstacksize(attr, size) (ENOSYS)
 
-static inline int pthread_key_delete(pthread_key_t key) {
-	if (key >= MAX_TLS_KEYS) return EINVAL;
+#define pthread_mutexattr_init(attr) (ENOSYS)
+#define pthread_mutexattr_destroy(attr) (ENOSYS)
+#define pthread_mutexattr_settype(attr, type) (ENOSYS)
+#define pthread_condattr_init(attr) (ENOSYS)
+#define pthread_condattr_destroy(attr) (ENOSYS)
 
-	return 0;
-}
+#define pthread_key_create(key, destructor) (ENOSYS)
+#define pthread_key_delete(key) (ENOSYS)
 
-static inline int pthread_setspecific(pthread_key_t key, const void *value) {
-	(void)key; (void)value;
-	return ENOSYS;
-}
+#define pthread_setspecific(key, value) (ENOSYS)
+#define pthread_getspecific(key) (NULL)
 
-static inline void *pthread_getspecific(pthread_key_t key) {
-	(void)key;
-	return NULL;
-}
+#define pthread_sigmask(how, set, oldset) (ENOSYS)
 
 #endif /* Platform implementations */
 

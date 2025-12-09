@@ -11,6 +11,7 @@
 	#define __jacl_arch_syscall __x64_syscall
 	#define __jacl_arch_tls_set __x64_set_fs_register
 	#define __jacl_arch_tls_get __x64_get_fs_register
+	#define __jacl_arch_clone_thread __x64_clone_thread
 	#define JACL_BITS 64
 #undef __ARCH_CONFIG
 #endif
@@ -74,6 +75,43 @@
 		return result;
 	}
 #undef __ARCH_TLS
+#endif
+
+#ifdef __ARCH_CLONE && JACL_OS_LINUX
+	static inline pid_t __x64_clone_thread(void *stack, size_t stack_size, int (*fn)(void *), void *arg) {
+		char *stack_top = (char *)stack + stack_size;
+		stack_top = (char *)((uintptr_t)stack_top & ~15UL) - 16;
+
+		int flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
+		long ret;
+
+		__asm__ volatile(
+			"mov $56, %%rax\n\t"         /* SYS_clone */
+			"mov %2, %%rdi\n\t"          /* flags */
+			"mov %3, %%rsi\n\t"          /* child_stack */
+			"xor %%rdx, %%rdx\n\t"       /* parent_tid = NULL */
+			"xor %%r10, %%r10\n\t"       /* child_tid = NULL */
+			"syscall\n\t"
+			"test %%rax, %%rax\n\t"      /* Check return value */
+			"jnz 1f\n\t"                 /* Parent if non-zero */
+
+			/* Child path (rax == 0) */
+			"xor %%rbp, %%rbp\n\t"
+			"mov %5, %%rdi\n\t"          /* arg */
+			"call *%4\n\t"               /* fn(arg) */
+			"mov %%rax, %%rdi\n\t"
+			"mov $60, %%rax\n\t"         /* SYS_exit */
+			"syscall\n\t"
+
+			"1:\n\t"                     /* Parent continues */
+			: "=a"(ret)
+			: "a"((long)56), "r"((long)flags), "r"(stack_top), "r"(fn), "r"(arg)
+			: "rcx", "r11", "rdx", "rsi", "rdi", "r8", "r9", "r10", "memory"
+		);
+
+		return ret;
+	}
+#undef __ARCH_CLONE
 #endif
 
 #ifdef __cplusplus
