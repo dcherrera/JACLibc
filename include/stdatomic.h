@@ -175,9 +175,24 @@ static inline void atomic_signal_fence(memory_order mo) {
 	static inline type __jacl_atomic_fetch_add_##bits(volatile type *ptr, type val, memory_order mo) {atomic_thread_fence(mo);__asm__ volatile("lock xadd" suffix " %0,%1":"=r"(val),"+m"(*ptr):"0"(val):"memory");return val;} \
 	static inline bool __jacl_atomic_cmpxchg_##bits(volatile type *ptr, type *expected, type desired, memory_order mo) {atomic_thread_fence(mo);type old=*expected;__asm__ volatile("lock cmpxchg" suffix " %2,%1":"=a"(old),"+m"(*ptr):"r"(desired),"0"(old):"memory");if(old==*expected)return true;*expected=old;return false;}
 
-#elif JACL_ARCH_ARM32 || JACL_ARCH_ARM64
+#elif JACL_ARCH_ARM64
 
-// ARM with LDREX/STREX
+// ARM64 with LDXR/STXR - use compiler builtins for simplicity
+#define JACL_ATOMIC_SIZES \
+	JACL_ATOMIC_BUNDLE(8,  uint8_t ) \
+	JACL_ATOMIC_BUNDLE(16, uint16_t) \
+	JACL_ATOMIC_BUNDLE(32, uint32_t) \
+	JACL_ATOMIC_BUNDLE(64, uint64_t)
+#define JACL_ATOMIC_BUNDLE(bits, type) \
+	static inline type __jacl_atomic_load_##bits(volatile type *ptr, memory_order mo) {(void)mo;type val;__asm__ volatile("ldar %0, [%1]":"=r"(val):"r"(ptr):"memory");return val;} \
+	static inline void __jacl_atomic_store_##bits(volatile type *ptr, type val, memory_order mo) {(void)mo;__asm__ volatile("stlr %1, [%0]"::"r"(ptr),"r"(val):"memory");} \
+	static inline type __jacl_atomic_exchange_##bits(volatile type *ptr, type val, memory_order mo) {(void)mo;type old;unsigned s;do{__asm__ volatile("ldxr %0, [%2]\nstxr %w1, %3, [%2]":"=&r"(old),"=&r"(s):"r"(ptr),"r"(val):"memory");}while(s);return old;} \
+	static inline type __jacl_atomic_fetch_add_##bits(volatile type *ptr, type val, memory_order mo) {(void)mo;type old,tmp;unsigned s;do{__asm__ volatile("ldxr %0, [%3]\nadd %1, %0, %4\nstxr %w2, %1, [%3]":"=&r"(old),"=&r"(tmp),"=&r"(s):"r"(ptr),"r"(val):"memory");}while(s);return old;} \
+	static inline bool __jacl_atomic_cmpxchg_##bits(volatile type *ptr, type *expected, type desired, memory_order mo) {(void)mo;type old;unsigned s=1;__asm__ volatile("ldxr %0, [%2]":"=&r"(old):"m"(*ptr),"r"(ptr):"memory");if(old==*expected){__asm__ volatile("stxr %w0, %2, [%1]":"=&r"(s):"r"(ptr),"r"(desired):"memory");}if(s==0)return true;*expected=old;return false;}
+
+#elif JACL_ARCH_ARM32
+
+// ARM32 with LDREX/STREX
 #define JACL_ATOMIC_SIZES \
 	JACL_ATOMIC_BUNDLE(8,  uint8_t,  "ldrexb", "strexb") \
 	JACL_ATOMIC_BUNDLE(16, uint16_t, "ldrexh", "strexh") \

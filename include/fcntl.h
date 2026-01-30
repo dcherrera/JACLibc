@@ -476,6 +476,19 @@ static inline int fcntl(int fd, int cmd, ...) {
 }
 
 /* POSIX advisory functions */
+#if JACL_OS_DARWIN
+/* Darwin has no fadvise/fallocate syscalls - these are no-ops */
+static inline int posix_fadvise(int fd, off_t offset, off_t len, int advice) {
+	(void)fd; (void)offset; (void)len; (void)advice;
+	return 0; /* Success - advice is optional */
+}
+
+static inline int posix_fallocate(int fd, off_t offset, off_t len) {
+	/* Darwin: use ftruncate to extend file, best effort fallback */
+	(void)offset;
+	return (int)syscall(SYS_ftruncate, fd, offset + len);
+}
+#else
 static inline int posix_fadvise(int fd, off_t offset, off_t len, int advice) {
 	return (int)syscall(SYS_fadvise64, fd, offset, len, advice);
 }
@@ -483,6 +496,7 @@ static inline int posix_fadvise(int fd, off_t offset, off_t len, int advice) {
 static inline int posix_fallocate(int fd, off_t offset, off_t len) {
 	return (int)syscall(SYS_fallocate, fd, 0, offset, len);
 }
+#endif
 
 /* Large file support */
 #if JACL_HAS_LFS

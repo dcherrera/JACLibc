@@ -147,7 +147,10 @@ static inline int sched_getaffinity(pid_t pid, size_t cpusetsize, void *mask) {
 
 /* Thread yielding */
 static inline int sched_yield(void) {
-	#if JACL_HAS_POSIX
+	#if JACL_OS_DARWIN
+	  /* Darwin has no sched_yield syscall - use thread_switch via Mach or no-op */
+	  return 0;  /* No-op, scheduler handles this */
+	#elif JACL_OS_LINUX
 	  return syscall(SYS_sched_yield);
 	#elif JACL_OS_WINDOWS
 	  /* Windows equivalent */

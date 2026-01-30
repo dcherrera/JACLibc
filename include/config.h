@@ -224,7 +224,7 @@
 typedef void (*__jacl_init_fn)(void);
 
 #if JACL_OS_DARWIN
-  #define JACL_INIT_SECTION "__mod_init_func"
+  #define JACL_INIT_SECTION "__DATA,__mod_init_func"
 #elif JACL_OS_WINDOWS
   #define JACL_INIT_SECTION ".CRT$XCU"
 #else

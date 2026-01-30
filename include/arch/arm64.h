@@ -40,6 +40,18 @@
 #endif
 
 #ifdef __ARCH_START
+	#if JACL_OS_DARWIN
+	/* Darwin adds underscore prefix to C symbols */
+	__asm__(
+		".global _start\n"
+		"_start:\n"
+		"mov x29, #0\n"
+		"mov x30, #0\n"
+		"mov x0, sp\n"
+		"and sp, x0, #-16\n"
+		"bl __start_main\n"
+	);
+	#else
 	__asm__(
 		".global _start\n"
 		"_start:\n"
@@ -49,6 +61,7 @@
 		"and sp, x0, #-16\n"
 		"bl _start_main\n"
 	);
+	#endif
 
 	#if JACL_OS_LINUX
 		__asm__(
@@ -76,7 +89,7 @@
 #undef __ARCH_TLS
 #endif
 
-#ifdef __ARCH_CLONE && JACL_OS_LINUX
+#if defined(__ARCH_CLONE) && JACL_OS_LINUX
 	static inline pid_t __arm64_clone_thread(void *stack, size_t stack_size, int (*fn)(void *), void *arg) {
 		char *stack_top = (char *)stack + stack_size;
 		stack_top = (char *)((uintptr_t)stack_top & ~15UL) - 16;

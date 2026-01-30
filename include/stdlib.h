@@ -235,7 +235,9 @@ static inline int setenv(const char *name, const char *value, int overwrite) {
 
 	if (!str) { errno = ENOMEM; return -1; }
 
-	snprintf(str, len, "%s=%s", name, value);
+	strcpy(str, name);
+	strcat(str, "=");
+	strcat(str, value);
 
 	return putenv(str);
 }
