@@ -110,8 +110,6 @@ static inline void __jacl_lock_acquire(__jacl_lock_t* l) {
 	while (atomic_load_explicit(&l->owner, memory_order_acquire) != ticket) {
 		#if JACL_OS_WINDOWS
 			YieldProcessor();
-		#elif JACL_OS_DARWIN
-			pthread_yield_np();
 		#else
 			sched_yield();
 		#endif
@@ -125,6 +123,12 @@ static inline void __jacl_lock_release(__jacl_lock_t* l) {
 #define __jacl_bin_safety(seg, off, where) do { \
 	if ((off) >= (seg)->size || (off) + sizeof(__jacl_hdr_t) > (seg)->size) { \
 		return 0; \
+	} \
+} while (0)
+
+#define __jacl_bin_safety_void(seg, off, where) do { \
+	if ((off) >= (seg)->size || (off) + sizeof(__jacl_hdr_t) > (seg)->size) { \
+		return; \
 	} \
 } while (0)
 
@@ -173,7 +177,7 @@ static inline size_t __jacl_bin_pop(__jacl_segment_t* seg, size_t need) {
 
 static inline void __jacl_bin_push(__jacl_segment_t* seg, size_t off) {
 	int i = __jacl_bin_idx(((__jacl_hdr_t*)(seg->base + off))->size);
-	__jacl_bin_safety(seg, off, "push");
+	__jacl_bin_safety_void(seg, off, "push");
 
 	*(size_t*)(seg->base + off + sizeof(__jacl_hdr_t)) = seg->bins[i];
 	seg->bins[i] = off;
@@ -184,7 +188,7 @@ static inline void __jacl_bin_remove(__jacl_segment_t* seg, size_t off) {
 	int i = __jacl_bin_idx(((__jacl_hdr_t*)(seg->base + off))->size);
 	size_t cur = seg->bins[i];
 
-	__jacl_bin_safety(seg, off, "remove");
+	__jacl_bin_safety_void(seg, off, "remove");
 
 	if (cur == off) {
 		seg->bins[i] = *(size_t*)(seg->base + off + sizeof(__jacl_hdr_t));
