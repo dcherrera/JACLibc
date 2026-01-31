@@ -169,7 +169,7 @@ switch(mode) { \
 		else r = t; break; \
 	case JACL_RND_EVEN: \
 		if (fabs##suf(diff) > (type)0.5) r = t + (diff > 0 ? 1 : -1); \
-		else if (fabs##suf(diff) == (type)0.5 && fmod##suf(t, (type)2) != 0) r = t + (diff > 0 ? 1 : -1); \
+		else if (fabs##suf(diff) == (type)0.5 && ((long long)t & 1)) r = t + (diff > 0 ? 1 : -1); \
 		else r = t; break; \
 	default: \
 		if (width > 0) errno = EDOM; \
@@ -716,11 +716,12 @@ static inline type pre##name##suf(arg x, arg y, arg z) { \
 __jacl_math(isnormal)
 __jacl_math(signbit)
 __jacl_math(fabs)
-__jacl_math(fmod)
 
 __jacl_math(rmodes)
 __jacl_math(ceil)
 __jacl_math(floor)
+__jacl_math(trunc)  // Moved here: depends on rmodes, required by fmod
+__jacl_math(fmod)   // Depends on trunc
 
 __jacl_math(exp)
 __jacl_math(ldexp)
@@ -761,7 +762,7 @@ __jacl_math(modf)
 
 	__jacl_math(cbrt)
 	__jacl_math(hypot)
-	__jacl_math(trunc)
+	// trunc moved earlier (before fmod which depends on it)
 
 	__jacl_math(round)
 	__jacl_math(lround)

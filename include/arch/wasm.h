@@ -10,6 +10,8 @@
 	#define JACL_ARCH_WASM 1
 	#define __jacl_arch_syscall __wasm_syscall
 	#define JACL_BITS 32
+	/* WASM uses 128-bit long double (IEEE-754 quad precision) */
+	#define JACL_LDBL_BITS 128
 	#include JACL_HEADER(arch,wasm_helpers);
 #undef __ARCH_CONFIG
 #endif

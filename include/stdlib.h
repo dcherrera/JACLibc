@@ -26,6 +26,9 @@
 extern "C" {
 #endif
 
+/* Forward declaration for snprintf (defined in stdio.h) */
+int snprintf(char *restrict str, size_t size, const char *restrict format, ...);
+
 /* Standard exit codes */
 #define EXIT_SUCCESS 0
 #define EXIT_FAILURE 1
