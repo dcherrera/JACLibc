@@ -461,9 +461,6 @@ static inline int remove(const char *filename) {
 
 	return unlink(filename);
 }
-static inline int renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath) {
-	return (int)syscall(SYS_renameat, olddirfd, oldpath, newdirfd, newpath);
-}
 static inline int rename(const char *old, const char *newpath) {
 	if (!old || !newpath) {
 		errno = EINVAL;
