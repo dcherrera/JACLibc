@@ -110,8 +110,6 @@ static inline void __jacl_lock_acquire(__jacl_lock_t* l) {
 	while (atomic_load_explicit(&l->owner, memory_order_acquire) != ticket) {
 		#if JACL_OS_WINDOWS
 			YieldProcessor();
-		#elif JACL_OS_DARWIN
-			pthread_yield_np();
 		#else
 			sched_yield();
 		#endif

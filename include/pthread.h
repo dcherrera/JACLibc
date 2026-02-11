@@ -590,7 +590,7 @@ static inline noreturn void pthread_exit(void *retval) {
 	#if JACL_OS_LINUX
 		syscall(SYS_exit, 0);
 	#elif JACL_OS_DARWIN
-		syscall(SYS_thread_terminate, 0);
+		syscall(SYS_bsdthread_terminate, 0, 0, 0, 0, 0);
 	#elif JACL_OS_FREEBSD
 		syscall(SYS_thr_exit, NULL);
 	#else

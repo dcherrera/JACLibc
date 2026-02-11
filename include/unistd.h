@@ -71,7 +71,19 @@ static inline int truncate(const char *path, off_t length) { return (int)syscall
 
 /* Directory operations */
 static inline int chdir(const char *path) { return (int)syscall(SYS_chdir, path); }
+#if JACL_OS_DARWIN
+/* Darwin has no SYS_getcwd - use fcntl F_GETPATH on current directory fd */
+static inline char *getcwd(char *buf, size_t size) {
+	int fd = (int)syscall(SYS_open, ".", 0, 0);
+	if (JACL_UNLIKELY(fd < 0)) return NULL;
+	int result = (int)syscall(SYS_fcntl, fd, 50 /* F_GETPATH */, buf); /* F_GETPATH = 50 on Darwin */
+	syscall(SYS_close, fd);
+	if (JACL_UNLIKELY(result < 0)) return NULL;
+	return buf;
+}
+#else
 static inline char *getcwd(char *buf, size_t size) { return (char*)syscall(SYS_getcwd, buf, size); }
+#endif
 
 /* Process execution */
 static inline int execve(const char *pathname, char *const argv[], char *const envp[]) { return (int)syscall(SYS_execve, pathname, argv, envp); }

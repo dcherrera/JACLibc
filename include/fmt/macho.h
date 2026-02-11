@@ -49,12 +49,13 @@ static inline void __jacl_init_fmt(void)
 	(void)__jacl_arch_tls_set;
 }
 
-/* macOS: __mod_init_func section */
+/* macOS: dyld handles __mod_init_func automatically before _start_main
+ * Unlike Linux ELF, Mach-O doesn't provide __start/__stop section symbols.
+ * Constructors in __DATA,__mod_init_func are called by dyld, so we don't
+ * need to iterate them manually. Set INIT_START/END to NULL to skip. */
 typedef void (*init_func_t)(void);
-extern init_func_t __start___mod_init_func[] __attribute__((weak));
-extern init_func_t __stop___mod_init_func[] __attribute__((weak));
-#define INIT_START __start___mod_init_func
-#define INIT_END __stop___mod_init_func
+#define INIT_START ((init_func_t*)0)
+#define INIT_END   ((init_func_t*)0)
 
 #undef __FMT_INIT
 #endif
