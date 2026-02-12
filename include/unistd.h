@@ -68,6 +68,7 @@ static inline int symlink(const char *target, const char *linkpath) { return (in
 static inline ssize_t readlink(const char *pathname, char *buf, size_t bufsiz) { return syscall(SYS_readlink, pathname, buf, bufsiz); }
 static inline int ftruncate(int fd, off_t length) { return (int)syscall(SYS_ftruncate, fd, length); }
 static inline int truncate(const char *path, off_t length) { return (int)syscall(SYS_truncate, path, length); }
+static inline int renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath) { return (int)syscall(SYS_renameat, olddirfd, oldpath, newdirfd, newpath); }
 
 /* Directory operations */
 static inline int chdir(const char *path) { return (int)syscall(SYS_chdir, path); }
