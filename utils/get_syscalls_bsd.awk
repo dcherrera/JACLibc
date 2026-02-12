@@ -57,6 +57,9 @@ function process_block(num, blk,    m, sig, name) {
 	# Strip sys_ prefix if present
 	sub(/^sys_/, "", name)
 
+	# Skip unimplemented syscall placeholders (duplicate enum names)
+	if (name == "nosys" || name == "enosys") return
+
 	printf "X(SYS_%s, %d, %s)\n", name, num, name
 }
 
