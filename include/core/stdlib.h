@@ -171,16 +171,18 @@ static inline size_t __jacl_bin_pop(__jacl_segment_t* seg, size_t need) {
 	return off;
 }
 
-static inline void __jacl_bin_push(__jacl_segment_t* seg, size_t off) {
+static inline int __jacl_bin_push(__jacl_segment_t* seg, size_t off) {
 	int i = __jacl_bin_idx(((__jacl_hdr_t*)(seg->base + off))->size);
 	__jacl_bin_safety(seg, off, "push");
 
 	*(size_t*)(seg->base + off + sizeof(__jacl_hdr_t)) = seg->bins[i];
 	seg->bins[i] = off;
 	seg->bitmap |= 1u << i;
+
+	return 1;
 }
 
-static inline void __jacl_bin_remove(__jacl_segment_t* seg, size_t off) {
+static inline int __jacl_bin_remove(__jacl_segment_t* seg, size_t off) {
 	int i = __jacl_bin_idx(((__jacl_hdr_t*)(seg->base + off))->size);
 	size_t cur = seg->bins[i];
 
@@ -204,6 +206,8 @@ static inline void __jacl_bin_remove(__jacl_segment_t* seg, size_t off) {
 
 	if (!seg->bins[i])
 		seg->bitmap &= ~(1u << i);
+
+	return 1;
 }
 
 static inline __jacl_segment_t* __jacl_find_segment(void* ptr) {
