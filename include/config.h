@@ -331,7 +331,7 @@ static inline void* __jacl_frame_address(int level) {
 /* ============================================================= */
 
 // Has POSIX
-#ifdef JACL_OS_WINDOWS
+#if defined(JACL_OS_WINDOWS) || defined(JACL_OS_NONE) || (defined(__STDC_HOSTED__) && __STDC_HOSTED__ == 0)
 	#define JACL_HAS_POSIX 0
 #else /* everything else */
 	#define JACL_HAS_POSIX 1
