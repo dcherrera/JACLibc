@@ -39,6 +39,9 @@ extern "C" {
 	#include <sys/wait.h>
 	#include <sys/mman.h>
 	#include <sys/syscall.h>
+	#if JACL_OS_DARWIN
+		#include <dlfcn.h>
+	#endif
 #else
 	#define PTHREAD_DUMMY 1
 #endif
@@ -456,12 +459,34 @@ static inline int __jacl_pthread_entry(void *arg) {
 	__jacl_pthread_destroy();
 
 	free(ta);
+#if JACL_OS_DARWIN
+	return 0;  /* system pthread handles thread cleanup */
+#else
 	_exit(0);
+#endif
 }
 
 static inline pid_t __jacl_pthread_clone_thread(void *stack, size_t stack_size, int (*fn)(void *), void *arg) {
 	#if JACL_OS_LINUX
 		return __jacl_arch_clone_thread(stack, stack_size, fn, arg);
+	#elif JACL_OS_DARWIN
+		(void)stack;
+		(void)stack_size;
+
+		/* Use system libpthread (always available on macOS via libSystem) */
+		typedef int (*sys_pthread_create_t)(void *, const void *, void *(*)(void *), void *);
+		static sys_pthread_create_t sys_create = NULL;
+		if (!sys_create) {
+			sys_create = (sys_pthread_create_t)dlsym(RTLD_DEFAULT, "pthread_create");
+			if (!sys_create) return -1;
+		}
+
+		unsigned long sys_thread;
+		/* Cast fn: int(*)(void*) -> void*(*)(void*) — return value unused */
+		int ret = sys_create((void *)&sys_thread, NULL, (void *(*)(void *))fn, arg);
+		if (ret != 0) return -1;
+
+		return (pid_t)syscall(SYS_thread_selfid);
 	#else
 		(void)stack;
 		(void)stack_size;
@@ -496,7 +521,9 @@ static inline int pthread_create(pthread_t *thread, const pthread_attr_t *attr, 
 
 	#if JACL_OS_LINUX
 		stack = mmap(NULL, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
-
+		if (stack == MAP_FAILED) stack = NULL;
+	#elif JACL_OS_DARWIN
+		stack = mmap(NULL, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 		if (stack == MAP_FAILED) stack = NULL;
 	#endif
 
@@ -530,8 +557,7 @@ static inline int pthread_create(pthread_t *thread, const pthread_attr_t *attr, 
 		*thread = t;
 		return 0;
 	} else {
-		#if JACL_OS_LINUX
-			/* We know stack_size, we just mapped/alloc’d it. */
+		#if JACL_OS_LINUX || JACL_OS_DARWIN
 			if (stack) munmap(stack, stack_size);
 		#else
 			free(stack);
@@ -557,7 +583,7 @@ static inline int pthread_join(pthread_t thread, void **retval) {
 	while (!atomic_load(&thread->finished)) nanosleep(&ts, NULL);
 	if (retval) *retval = thread->result;
 
-	#if JACL_OS_LINUX
+	#if JACL_OS_LINUX || JACL_OS_DARWIN
 		if (thread->stack && thread->stack_size && munmap(thread->stack, thread->stack_size) != 0) free(thread->stack);
 	#else
 		free(thread->stack);
@@ -611,7 +637,7 @@ static inline int pthread_detach(pthread_t thread) {
 	if (!atomic_compare_exchange_strong(&thread->detached, &expected, 1)) return EINVAL; /* already detached */
 
 	if (atomic_load(&thread->finished)) {
-		#if JACL_OS_LINUX
+		#if JACL_OS_LINUX || JACL_OS_DARWIN
 			if (thread->stack && thread->stack_size && munmap(thread->stack, thread->stack_size) != 0) free(thread->stack);
 		#else
 			free(thread->stack);
