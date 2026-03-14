@@ -1,3 +1,4 @@
 Makefile
 .metabuild/
 out/
+.teamide/chatHistory/
